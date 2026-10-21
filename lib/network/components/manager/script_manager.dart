@@ -113,13 +113,27 @@ async function onResponse(context, request, response) {
       return;
     }
 
-    var level = args.removeAt(0);
-    String output = args.join(' ');
-    if (level == 'info') level = 'warn';
-    LogInfo logInfo = LogInfo(level, output);
+    final entry = _consoleEntry(args);
+    if (entry == null) return;
+    LogInfo logInfo = LogInfo(entry.level, entry.output, time: entry.time);
     for (int i = 0; i < _logHandlers.length; i++) {
       _logHandlers[i].handle.call(logInfo);
     }
+  }
+
+  static ScriptConsoleEntry? _consoleEntry(dynamic args, {String? scriptName}) {
+    if (args is! List || args.isEmpty) return null;
+    var level = args.first.toString();
+    if (level == 'info') level = 'warn';
+    return ScriptConsoleEntry(level, args.skip(1).join(' '), scriptName: scriptName);
+  }
+
+  static void captureConsoleLog(HttpRequest request, String? scriptName, dynamic args, {bool response = false}) {
+    final entry = _consoleEntry(args, scriptName: scriptName);
+    if (entry == null) return;
+    final logs = response ? request.responseScriptLogs : request.requestScriptLogs;
+    if (logs.length >= 1000) logs.removeAt(0);
+    logs.add(entry);
   }
 
   ///重新加载脚本
@@ -305,11 +319,17 @@ async function onResponse(context, request, response) {
           continue;
         }
 
-        var result = await flutterJsPool.run((flutterJs) async {
-          var jsResult = await flutterJs.evaluateAsync(
-              """var request = $jsRequest, context = $context;  request['scriptContext'] = context; $script\n  onRequest(context, request)""");
-          return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
-        });
+        dynamic result;
+        try {
+          result = await flutterJsPool.run((flutterJs) async {
+            var jsResult = await flutterJs.evaluateAsync(
+                """var request = $jsRequest, context = $context;  request['scriptContext'] = context; $script\n  onRequest(context, request)""");
+            return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
+          }, onConsoleLog: (args) => captureConsoleLog(request, item.name, args));
+        } catch (error) {
+          request.requestScriptLogs.add(ScriptConsoleEntry('error', error.toString(), scriptName: item.name));
+          rethrow;
+        }
         if (result == null) {
           return null;
         }
@@ -350,12 +370,18 @@ async function onResponse(context, request, response) {
           continue;
         }
 
-        var result = await flutterJsPool.run((flutterJs) async {
-          var jsResult = await flutterJs.evaluateAsync(
-              """var response = $jsResponse, context = $context;  response['scriptContext'] = context; $script
-            \n  onResponse(context, $jsRequest, response);""");
-          return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
-        });
+        dynamic result;
+        try {
+          result = await flutterJsPool.run((flutterJs) async {
+            var jsResult = await flutterJs.evaluateAsync(
+                """var response = $jsResponse, context = $context;  response['scriptContext'] = context; $script
+              \n  onResponse(context, $jsRequest, response);""");
+            return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
+          }, onConsoleLog: (args) => captureConsoleLog(request, item.name, args, response: true));
+        } catch (error) {
+          request.responseScriptLogs.add(ScriptConsoleEntry('error', error.toString(), scriptName: item.name));
+          rethrow;
+        }
         if (result == null) {
           return null;
         }

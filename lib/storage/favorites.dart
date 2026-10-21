@@ -75,6 +75,8 @@ class FavoriteStorage {
 
   static Favorite _snapshotFavorite(HttpRequest request) {
     final copiedRequest = request.copy();
+    copiedRequest.requestScriptLogs.addAll(request.requestScriptLogs);
+    copiedRequest.responseScriptLogs.addAll(request.responseScriptLogs);
     final copiedResponse = request.response?.copy();
     return Favorite(copiedRequest, response: copiedResponse);
   }

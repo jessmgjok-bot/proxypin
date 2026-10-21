@@ -35,8 +35,17 @@ class RequestListWidget extends StatefulWidget {
   final ProxyServer proxyServer;
   final ListenableList<HttpRequest>? list;
   final MultiSelectController selectionController;
+  final bool liveCapture;
+  final bool? initialSortDesc;
 
-  const RequestListWidget({super.key, required this.proxyServer, this.list, required this.selectionController});
+  const RequestListWidget({
+    super.key,
+    required this.proxyServer,
+    this.list,
+    required this.selectionController,
+    this.liveCapture = false,
+    this.initialSortDesc,
+  });
 
   @override
   State<StatefulWidget> createState() {
@@ -53,12 +62,14 @@ class RequestListState extends State<RequestListWidget> {
 
   //当前搜索模型
   SearchModel? _currentSearchModel;
+  late bool sortDesc;
 
   AppLocalizations get localizations => AppLocalizations.of(context)!;
 
   @override
   void initState() {
     super.initState();
+    sortDesc = widget.initialSortDesc ?? true;
     if (widget.list != null) {
       container = widget.list!;
     }
@@ -92,12 +103,16 @@ class RequestListState extends State<RequestListWidget> {
                   key: requestSequenceKey,
                   container: container,
                   proxyServer: widget.proxyServer,
+                  sortDesc: sortDesc,
+                  followLatest: widget.liveCapture,
                   onRemove: sequenceRemove,
                   selectionController: widget.selectionController),
               DomainList(
                   key: domainListKey,
                   list: container,
                   proxyServer: widget.proxyServer,
+                  followLatest: widget.liveCapture,
+                  initialSortDesc: sortDesc,
                   onRemove: domainListRemove,
                   onInitialized: () {
                     if (_currentSearchModel != null && _currentSearchModel!.isNotEmpty) {
@@ -178,9 +193,10 @@ class RequestListState extends State<RequestListWidget> {
     showExportDialog(context, view.toList(), folderName);
   }
 
-  void sort(bool sortDesc) {
-    requestSequenceKey.currentState?.sort(sortDesc);
-    domainListKey.currentState?.sort(sortDesc);
+  void sort(bool desc) {
+    setState(() => sortDesc = desc);
+    requestSequenceKey.currentState?.sort(desc);
+    domainListKey.currentState?.sort(desc);
   }
 }
 

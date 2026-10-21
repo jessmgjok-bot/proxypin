@@ -40,10 +40,20 @@ import 'package:proxypin/utils/listenable_list.dart';
 class DomainList extends StatefulWidget {
   final ListenableList<HttpRequest> list;
   final ProxyServer proxyServer;
+  final bool followLatest;
+  final bool initialSortDesc;
   final Function(List<HttpRequest>)? onRemove;
   final VoidCallback? onInitialized; // 初始化完成回调
 
-  const DomainList({super.key, required this.list, required this.proxyServer, this.onRemove, this.onInitialized});
+  const DomainList({
+    super.key,
+    required this.list,
+    required this.proxyServer,
+    this.followLatest = false,
+    this.initialSortDesc = true,
+    this.onRemove,
+    this.onInitialized,
+  });
 
   @override
   State<StatefulWidget> createState() {
@@ -73,13 +83,14 @@ class DomainListState extends State<DomainList> with AutomaticKeepAliveClientMix
 
   bool changing = false;
 
-  bool sortDesc = true;
+  bool sortDesc = false;
 
   AppLocalizations get localizations => AppLocalizations.of(context)!;
 
   @override
   initState() {
     super.initState();
+    sortDesc = widget.initialSortDesc;
     configuration = widget.proxyServer.configuration;
     initFromContainer();
 
@@ -106,8 +117,9 @@ class DomainListState extends State<DomainList> with AutomaticKeepAliveClientMix
     domainList.add(hostAndPort);
 
     var list = containerMap[hostAndPort] ??= [];
-    list.add(request);
-    if (showHostAndPort == request.hostAndPort) {
+    final isNew = !list.contains(request);
+    if (isNew) list.add(request);
+    if (isNew && showHostAndPort == request.hostAndPort) {
       requestSequenceKey.currentState?.add(request);
     }
 
@@ -240,8 +252,9 @@ class DomainListState extends State<DomainList> with AutomaticKeepAliveClientMix
                 body: RequestSequence(
                   key: requestSequenceKey,
                   displayDomain: false,
-                  container: ListenableList(sortDesc ? list : list?.reversed.toList()),
+                  container: ListenableList(list),
                   sortDesc: sortDesc,
+                  followLatest: widget.followLatest,
                   onRemove: (requests) {
                     widget.onRemove?.call(requests);
                     remove(requests);

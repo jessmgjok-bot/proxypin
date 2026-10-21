@@ -82,6 +82,9 @@ class AppConfiguration {
   /// Headers展示模式: table(逐行) / text(原始文本)
   String headerViewMode = "table";
 
+  /// Desktop request detail layout: tabs / vertical.
+  String detailLayoutMode = "tabs";
+
   /// 底部导航栏
   bool bottomNavigation = true;
 
@@ -222,6 +225,7 @@ class AppConfiguration {
       pipEnabled.value = config['pipEnabled'] ?? true;
       pipIcon.value = config['pipIcon'] ?? false;
       headerViewMode = config['headerViewMode'] ?? "table";
+      detailLayoutMode = config['detailLayoutMode'] == 'vertical' ? 'vertical' : 'tabs';
       bottomNavigation = config['bottomNavigation'] ?? true;
       memoryCleanupThreshold = config['memoryCleanupThreshold'];
       autoReadEnabled = config['autoReadEnabled'] ?? true;
@@ -275,6 +279,7 @@ class AppConfiguration {
       "language": _language?.languageCode,
       "languageScript": _language?.scriptCode,
       "headerViewMode": headerViewMode,
+      if (Platforms.isDesktop()) 'detailLayoutMode': detailLayoutMode,
       "autoReadEnabled": autoReadEnabled,
       "clearConfirm": clearConfirm,
       if (memoryCleanupThreshold != null) 'memoryCleanupThreshold': memoryCleanupThreshold,

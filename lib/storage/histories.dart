@@ -226,9 +226,15 @@ class HistoryTask extends ListenerListEvent<HttpRequest> {
   HistoryItem? history;
   Timer? timer;
   final Queue writeList = Queue();
+  final Set<HttpRequest> updateList = {};
+  final Set<HttpRequest> writtenRequests = {};
 
   RandomAccessFile? open;
   bool locked = false;
+  bool writing = false;
+  bool resetPending = false;
+  bool canceling = false;
+  Completer<void>? _writeDone;
 
   static HistoryTask? _instance;
 
@@ -245,6 +251,10 @@ class HistoryTask extends ListenerListEvent<HttpRequest> {
 
   static HistoryTask ensureInstance(Configuration configuration, ListenableList<HttpRequest> sourceList) {
     return _instance ??= HistoryTask(configuration, sourceList);
+  }
+
+  static void notifyResponse(HttpRequest? request) {
+    if (request != null) _instance?.onUpdate(request);
   }
 
   //清理历史数据
@@ -273,6 +283,11 @@ class HistoryTask extends ListenerListEvent<HttpRequest> {
   }
 
   @override
+  void onUpdate(HttpRequest item) {
+    if (writtenRequests.contains(item)) updateList.add(item);
+  }
+
+  @override
   void onRemove(HttpRequest item) => resetList();
 
   @override
@@ -281,27 +296,24 @@ class HistoryTask extends ListenerListEvent<HttpRequest> {
   @override
   void clear(List<HttpRequest> items) => resetList();
 
-  Future<void> resetList() async {
-    locked = true;
-    await open?.lock().timeout(Duration(seconds: 3), onTimeout: () => open!.unlock());
-    open = await open?.truncate(0);
-    await open?.setPosition(0);
-    history?.requestLength = 0;
-    history?.requests = null;
-    writeList.clear();
-    writeList.addAll(sourceList.source);
-    locked = false;
-    open?.unlock();
+  void resetList() {
+    resetPending = true;
+    if (open != null && !writing && !locked) unawaited(writeTask());
   }
 
-  void cancelTask() {
+  Future<void> cancelTask() async {
+    canceling = true;
     timer?.cancel();
     timer = null;
-    open?.close();
+    sourceList.removeListener(this);
+    await _writeDone?.future;
+    await open?.close();
     open = null;
     history = null;
-    sourceList.removeListener(this);
     writeList.clear();
+    updateList.clear();
+    writtenRequests.clear();
+    resetPending = false;
   }
 
   //写入任务
@@ -315,34 +327,64 @@ class HistoryTask extends ListenerListEvent<HttpRequest> {
     history = await storage.addHistory(name, file, 0);
     writeList.clear();
     writeList.addAll(sourceList.source);
+    updateList.clear();
+    writtenRequests.clear();
+    resetPending = false;
     locked = false;
 
     open = await file.open(mode: FileMode.append);
     timer = Timer.periodic(const Duration(seconds: 5), (it) => writeTask());
+    if (resetPending) unawaited(writeTask());
   }
 
   //写入任务
   Future<void> writeTask() async {
-    if (writeList.isEmpty) {
-      return;
+    if (writing || locked || canceling || open == null || history == null) return;
+    if (writeList.isEmpty && updateList.isEmpty && !resetPending) return;
+    writing = true;
+    final writeDone = Completer<void>();
+    _writeDone = writeDone;
+    var completed = false;
+    try {
+      if (resetPending) {
+        resetPending = false;
+        await open!.truncate(0);
+        await open!.setPosition(0);
+        history!.requestLength = 0;
+        history!.requests = null;
+        writeList.clear();
+        writeList.addAll(sourceList.source);
+        updateList.clear();
+        writtenRequests.clear();
+      }
+
+      while (writeList.isNotEmpty) {
+        final request = writeList.removeFirst() as HttpRequest;
+        writtenRequests.add(request);
+        final har = Har.toHar(request);
+        await open!.writeString("${jsonEncode(har)},\n");
+        history!.requestLength++;
+      }
+
+      while (updateList.isNotEmpty) {
+        final request = updateList.first;
+        updateList.remove(request);
+        if (!sourceList.source.contains(request)) continue;
+        final har = Har.toHar(request)..['_historyUpdate'] = true;
+        await open!.writeString("${jsonEncode(har)},\n");
+      }
+
+      history!.fileSize = await open!.length();
+      history!.requests = null;
+      var historyStorage = await HistoryStorage.instance;
+      await historyStorage.updateHistory(historyStorage.getIndex(history!), history!);
+      completed = true;
+    } finally {
+      writing = false;
+      _writeDone = null;
+      writeDone.complete();
+      if (completed && resetPending && !canceling) unawaited(writeTask());
     }
-
-    bool changed = false;
-    while (writeList.isNotEmpty && !locked) {
-      var request = writeList.removeFirst();
-      var har = Har.toHar(request);
-
-      await open?.writeString("${jsonEncode(har)},\n");
-
-      history!.requestLength++;
-      changed = true;
-    }
-
-    if (!changed) return;
-    history!.fileSize = await open!.length();
-    history!.requests = null;
-    var historyStorage = await HistoryStorage.instance;
-    historyStorage.updateHistory(historyStorage.getIndex(history!), history!);
   }
 }
 

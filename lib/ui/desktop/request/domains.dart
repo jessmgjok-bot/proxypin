@@ -52,6 +52,7 @@ class DomainList extends StatefulWidget {
 
   final ListenableList<HttpRequest> list;
   final bool shrinkWrap;
+  final bool initialSortDesc;
   final Function(List<HttpRequest>)? onRemove;
   final MultiSelectController selectionController;
   final RequestSelectionHandlers selectionHandlers;
@@ -61,6 +62,7 @@ class DomainList extends StatefulWidget {
       required this.proxyServer,
       required this.list,
       this.shrinkWrap = true,
+      this.initialSortDesc = true,
       required this.panel,
       this.onRemove,
       required this.selectionController,
@@ -86,7 +88,7 @@ class DomainWidgetState extends State<DomainList> with AutomaticKeepAliveClientM
   late VoidCallback highlightListener;
   late MultiSelectListener<String> selectionListener;
 
-  bool sortDesc = true;
+  bool sortDesc = false;
 
   AppLocalizations get localizations => AppLocalizations.of(context)!;
 
@@ -106,6 +108,7 @@ class DomainWidgetState extends State<DomainList> with AutomaticKeepAliveClientM
   @override
   void initState() {
     super.initState();
+    sortDesc = widget.initialSortDesc;
     var container = widget.list;
     for (var request in container.source) {
       DomainRequests domainRequests = getDomainRequests(request);

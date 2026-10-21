@@ -22,7 +22,8 @@ class JavaScriptRuntimePool {
 
   JavaScriptRuntimePool({required int size, this.consoleLog}) : size = size < 1 ? 1 : size;
 
-  Future<T> run<T>(Future<T> Function(JavascriptRuntime flutterJs) action) async {
+  Future<T> run<T>(Future<T> Function(JavascriptRuntime flutterJs) action,
+      {Function(dynamic args)? onConsoleLog}) async {
     final runtime = _selectRuntime();
     runtime.pending++;
     try {
@@ -30,7 +31,26 @@ class JavaScriptRuntimePool {
         _runtimes.remove(runtime);
         throw error!;
       });
-      return await JavaScriptEngine.synchronized(flutterJs, () => action(flutterJs));
+      return await JavaScriptEngine.synchronized(flutterJs, () async {
+        if (onConsoleLog == null) return action(flutterJs);
+
+        final callbacks = JavascriptRuntime.channelFunctionsRegistered[flutterJs.getEngineInstanceId()]!;
+        final previous = callbacks['ConsoleLog'];
+        callbacks['ConsoleLog'] = (dynamic args) async {
+          final globalResult = previous?.call(args);
+          onConsoleLog(args);
+          if (globalResult is Future) await globalResult;
+        };
+        try {
+          return await action(flutterJs);
+        } finally {
+          if (previous == null) {
+            callbacks.remove('ConsoleLog');
+          } else {
+            callbacks['ConsoleLog'] = previous;
+          }
+        }
+      });
     } on TimeoutException catch (e) {
       _runtimes.remove(runtime);
       logger.e('JavaScript runtime timed out and was removed from pool: $e');

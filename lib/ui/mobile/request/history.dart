@@ -383,13 +383,13 @@ class _MobileHistoryState extends State<MobileHistory> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: Text(localizations.cancel)),
               TextButton(
-                  onPressed: () {
-                    setState(() {
-                      if (storage.getHistory(index) == widget.historyTask.history) {
-                        widget.historyTask.cancelTask();
-                      }
-                      storage.removeHistory(index);
-                    });
+                  onPressed: () async {
+                    if (storage.getHistory(index) == widget.historyTask.history) {
+                      await widget.historyTask.cancelTask();
+                    }
+                    await storage.removeHistory(index);
+                    if (!mounted) return;
+                    setState(() {});
                     FlutterToastr.show(localizations.deleteSuccess, context);
                     Navigator.pop(context);
                   },

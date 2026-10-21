@@ -28,7 +28,7 @@ import 'package:proxypin/ui/mobile/widgets/remote_device.dart';
 
 /// +号菜单
 class MoreMenu extends StatelessWidget {
-  static bool sortDesc = true;
+  static bool sortDesc = false;
 
   final ProxyServer proxyServer;
   final ValueNotifier<RemoteModel> remoteDevice;

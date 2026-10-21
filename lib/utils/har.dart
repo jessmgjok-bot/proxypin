@@ -36,6 +36,8 @@ class Har {
       "time": request.response?.responseTime.difference(request.requestTime).inMilliseconds ?? -1, // 请求耗时，单位毫秒
       "pageref": "ProxyPin", // 页面标识
       "_id": request.requestId, // 页面标识
+      if (request.requestScriptLogs.isNotEmpty || request.responseScriptLogs.isNotEmpty)
+        '_scriptConsole': _scriptConsole(request),
       '_app': request.processInfo?.toJson(),
       "request": {
         "method": request.method.name, // 请求方法
@@ -84,6 +86,8 @@ class Har {
       "time": -1,
       "pageref": "ProxyPin",
       "_id": request.requestId,
+      if (request.requestScriptLogs.isNotEmpty || request.responseScriptLogs.isNotEmpty)
+        '_scriptConsole': _scriptConsole(request),
       "_phase": "request",
       '_app': request.processInfo?.toJson(),
       "request": {
@@ -110,6 +114,8 @@ class Har {
       "time": request.response?.responseTime.difference(request.requestTime).inMilliseconds ?? -1,
       "pageref": "ProxyPin",
       "_id": request.requestId,
+      if (request.requestScriptLogs.isNotEmpty || request.responseScriptLogs.isNotEmpty)
+        '_scriptConsole': _scriptConsole(request),
       "_phase": "response",
       '_app': request.processInfo?.toJson(),
       "request": {
@@ -163,6 +169,11 @@ class Har {
     return jsonEncode(har);
   }
 
+  static Map<String, dynamic> _scriptConsole(HttpRequest request) => {
+        'request': request.requestScriptLogs.map((e) => e.toJson()).toList(),
+        'response': request.responseScriptLogs.map((e) => e.toJson()).toList(),
+      };
+
   static Future<File> writeFile(List<HttpRequest> list, File file, {String title = ''}) async {
     var json = await writeJson(list, title: title);
     return file.writeAsString(json);
@@ -172,6 +183,7 @@ class Har {
   static Future<List<HttpRequest>> readFile(File file) async {
     var lines = await file.readAsLines();
     List<HttpRequest> list = [];
+    final requestIndexes = <String, int>{};
 
     for (var value in lines) {
       var line = value.trim();
@@ -181,7 +193,12 @@ class Har {
       }
       var har = jsonDecode(line);
       var request = toRequest(har);
-      list.add(request);
+      if (har['_historyUpdate'] == true && requestIndexes.containsKey(request.requestId)) {
+        list[requestIndexes[request.requestId]!] = request;
+      } else {
+        requestIndexes[request.requestId] = list.length;
+        list.add(request);
+      }
     }
     return list;
   }
@@ -210,6 +227,19 @@ class Har {
 
     var httpRequest = HttpRequest(HttpMethod.valueOf(method), request['url'], protocolVersion: request['httpVersion']);
     if (har.containsKey("_id")) httpRequest.requestId = har['_id'].toString(); // 页面标识
+    final scriptConsole = har['_scriptConsole'];
+    if (scriptConsole is Map) {
+      for (final entry in scriptConsole['request'] as List? ?? const []) {
+        if (entry is Map) {
+          httpRequest.requestScriptLogs.add(ScriptConsoleEntry.fromJson(Map<String, dynamic>.from(entry)));
+        }
+      }
+      for (final entry in scriptConsole['response'] as List? ?? const []) {
+        if (entry is Map) {
+          httpRequest.responseScriptLogs.add(ScriptConsoleEntry.fromJson(Map<String, dynamic>.from(entry)));
+        }
+      }
+    }
     httpRequest.processInfo = har['_app'] == null ? null : ProcessInfo.fromJson(har['_app']);
     httpRequest.body = request['postData']?['text']?.toString().codeUnits;
     for (var element in headers) {

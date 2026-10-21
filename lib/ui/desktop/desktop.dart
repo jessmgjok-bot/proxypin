@@ -91,6 +91,7 @@ class _DesktopHomePagePageState extends State<DesktopHomePage> implements EventL
   @override
   void onResponse(ChannelContext channelContext, HttpResponse response) {
     requestListStateKey.currentState!.addResponse(channelContext, response);
+    HistoryTask.notifyResponse(response.request);
     panel.updateResponse(response);
   }
 
@@ -140,7 +141,8 @@ class _DesktopHomePagePageState extends State<DesktopHomePage> implements EventL
   @override
   Widget build(BuildContext context) {
     var navigationView = [
-      DesktopRequestListWidget(key: requestListStateKey, proxyServer: proxyServer, list: container, panel: panel),
+      DesktopRequestListWidget(
+          key: requestListStateKey, proxyServer: proxyServer, list: container, panel: panel, followLatest: true),
       Favorites(panel: panel),
       HistoryPageWidget(proxyServer: proxyServer, container: container, panel: panel),
       const Toolbox()

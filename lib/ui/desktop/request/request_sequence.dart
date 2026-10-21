@@ -35,6 +35,8 @@ class RequestSequence extends StatefulWidget {
   final ListenableList<HttpRequest> container;
   final ProxyServer proxyServer;
   final bool displayDomain;
+  final bool followLatest;
+  final bool initialSortDesc;
   final Function(List<HttpRequest>)? onRemove;
   final MultiSelectController selectionController;
   final RequestSelectionHandlers selectionHandlers;
@@ -45,6 +47,8 @@ class RequestSequence extends StatefulWidget {
       required this.container,
       required this.proxyServer,
       this.displayDomain = true,
+      this.followLatest = false,
+      this.initialSortDesc = true,
       this.onRemove,
       required this.selectionController,
       required this.selectionHandlers,
@@ -59,12 +63,14 @@ class RequestSequence extends StatefulWidget {
 class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliveClientMixin {
   late Configuration configuration;
 
-  ///显示的请求列表 最新的在前面
+  ///显示的请求列表，默认按捕获时间从旧到新。
   Queue<HttpRequest> view = Queue();
   final Map<String, VoidCallback> rowRefreshers = <String, VoidCallback>{};
+  final ScrollController _scrollController = ScrollController();
   bool changing = false;
+  bool _pinnedToBottom = true;
 
-  bool sortDesc = true;
+  bool sortDesc = false;
 
   AppLocalizations get localizations => AppLocalizations.of(context)!;
 
@@ -81,7 +87,12 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   void initState() {
     super.initState();
     configuration = widget.proxyServer.configuration;
-    view.addAll(widget.container.source.reversed);
+    sortDesc = widget.initialSortDesc;
+    view.addAll(sortDesc ? widget.container.source.reversed : widget.container.source);
+    _scrollController.addListener(_trackScrollPosition);
+    if (widget.followLatest) {
+      _followLatestAfterFrame();
+    }
 
     highlightListener = () {
       //回调时机在高亮设置页面dispose之后。所以需要在下一帧刷新，否则会报错
@@ -110,9 +121,11 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     if (!changing) {
       changing = true;
       Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
         setState(() {
           changing = false;
         });
+        _followLatestAfterFrame();
       });
     }
   }
@@ -124,6 +137,7 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   void dispose() {
     selectionController.selectedIds.removeListener(selectionListener);
     KeywordHighlights.removeListener(highlightListener);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -132,6 +146,7 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     super.build(context);
 
     return ListView.separated(
+      controller: _scrollController,
       cacheExtent: 1000,
       separatorBuilder: (context, index) => Divider(thickness: 0.2, height: 0, color: Theme.of(context).dividerColor),
       itemCount: view.length,
@@ -140,7 +155,7 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
         return RequestWidget(
           request,
           key: ValueKey(request.requestId),
-          index: sortDesc ? view.length - index : index,
+          index: sortDesc ? view.length - index : index + 1,
           trailing: appIcon(request),
           proxyServer: widget.proxyServer,
           displayDomain: widget.displayDomain,
@@ -209,7 +224,7 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     //搜索视图
     if (searchModel?.filter(response.request!, response) == true) {
       if (!view.contains(response.request)) {
-        view.addFirst(response.request!);
+        view = _filteredView(incomingResponse: response);
         changeState();
       }
     }
@@ -218,14 +233,11 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   ///过滤
   void search(SearchModel searchModel) {
     this.searchModel = searchModel;
-    if (searchModel.isEmpty) {
-      view = Queue.of(widget.container.source.reversed);
-    } else {
-      view = Queue.of(widget.container.where((it) => searchModel.filter(it, it.response)).toList().reversed);
-    }
+    view = _filteredView();
     rowRefreshers.removeWhere((requestId, _) => !view.any((request) => request.requestId == requestId));
     selectionController.prune(view.map((request) => request.requestId));
     setState(() {});
+    _trackScrollPositionAfterFrame();
   }
 
   void remove(List<HttpRequest> list) {
@@ -241,8 +253,9 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     setState(() {
       view.clear();
       rowRefreshers.clear();
-      view.addAll(widget.container.source.reversed);
+      view.addAll(_filteredView());
     });
+    _trackScrollPositionAfterFrame();
   }
 
   void selectRange(HttpRequest request) {
@@ -256,6 +269,35 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     sortDesc = desc;
     setState(() {
       view = Queue.of(view.toList().reversed);
+    });
+    _trackScrollPositionAfterFrame();
+  }
+
+  Queue<HttpRequest> _filteredView({HttpResponse? incomingResponse}) {
+    final requests = widget.container.source.where(
+      (request) => searchModel?.isNotEmpty != true ||
+          searchModel!.filter(request, identical(request, incomingResponse?.request) ? incomingResponse : request.response),
+    );
+    return Queue.of(sortDesc ? requests.toList().reversed : requests);
+  }
+
+  void _trackScrollPosition() {
+    if (_scrollController.hasClients) {
+      _pinnedToBottom = _scrollController.position.extentAfter <= 2;
+    }
+  }
+
+  void _trackScrollPositionAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _trackScrollPosition();
+    });
+  }
+
+  void _followLatestAfterFrame() {
+    if (!widget.followLatest || sortDesc) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pinnedToBottom || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     });
   }
 

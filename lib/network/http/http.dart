@@ -187,6 +187,32 @@ abstract class HttpMessage {
   }
 }
 
+class ScriptConsoleEntry {
+  final DateTime time;
+  final String level;
+  final String output;
+  final String? scriptName;
+
+  ScriptConsoleEntry(this.level, this.output, {this.scriptName, DateTime? time}) : time = time ?? DateTime.now();
+
+  factory ScriptConsoleEntry.fromJson(Map<String, dynamic> json) {
+    final timestamp = int.tryParse(json['time']?.toString() ?? '');
+    return ScriptConsoleEntry(
+      json['level']?.toString() ?? 'log',
+      json['output']?.toString() ?? '',
+      scriptName: json['scriptName']?.toString(),
+      time: timestamp == null ? null : DateTime.fromMillisecondsSinceEpoch(timestamp),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'time': time.millisecondsSinceEpoch,
+        'level': level,
+        'output': output,
+        if (scriptName != null) 'scriptName': scriptName,
+      };
+}
+
 ///HTTP请求。
 class HttpRequest extends HttpMessage {
   String _uri;
@@ -196,6 +222,8 @@ class HttpRequest extends HttpMessage {
   DateTime requestTime = DateTime.now(); //请求时间
   HttpResponse? response;
   Map<String, dynamic> attributes = {};
+  final List<ScriptConsoleEntry> requestScriptLogs = [];
+  final List<ScriptConsoleEntry> responseScriptLogs = [];
   ProcessInfo? processInfo;
 
   String get uri => _uri;
@@ -353,6 +381,8 @@ class HttpRequest extends HttpMessage {
       'body': body == null ? null : String.fromCharCodes(body!),
       'requestTime': requestTime.millisecondsSinceEpoch,
       'messages': messages.map((e) => e.toJson()).toList(),
+      if (requestScriptLogs.isNotEmpty) 'requestScriptLogs': requestScriptLogs.map((e) => e.toJson()).toList(),
+      if (responseScriptLogs.isNotEmpty) 'responseScriptLogs': responseScriptLogs.map((e) => e.toJson()).toList(),
     };
   }
 
@@ -372,6 +402,12 @@ class HttpRequest extends HttpMessage {
           .whereType<Map>()
           .map((e) => WebSocketFrame.fromJson(Map<String, dynamic>.from(e)))
           .toList();
+    }
+    for (final entry in json['requestScriptLogs'] as List? ?? const []) {
+      if (entry is Map) request.requestScriptLogs.add(ScriptConsoleEntry.fromJson(Map<String, dynamic>.from(entry)));
+    }
+    for (final entry in json['responseScriptLogs'] as List? ?? const []) {
+      if (entry is Map) request.responseScriptLogs.add(ScriptConsoleEntry.fromJson(Map<String, dynamic>.from(entry)));
     }
     request.packageSize = json['packageSize'];
     return request;

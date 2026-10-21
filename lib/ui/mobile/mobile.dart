@@ -110,6 +110,7 @@ class MobileHomeState extends State<MobileHomePage> implements EventListener, Li
   @override
   void onResponse(ChannelContext channelContext, HttpResponse response) {
     MobileApp.requestStateKey.currentState!.addResponse(channelContext, response);
+    HistoryTask.notifyResponse(response.request);
     NetworkTabController.current?.updateResponse(response);
   }
 
@@ -454,6 +455,8 @@ class RequestPageState extends State<RequestPage> {
                         key: MobileApp.requestStateKey,
                         proxyServer: proxyServer,
                         list: MobileApp.container,
+                        liveCapture: true,
+                        initialSortDesc: MoreMenu.sortDesc,
                         selectionController: MobileApp.multiSelectController))
               ]);
             }),

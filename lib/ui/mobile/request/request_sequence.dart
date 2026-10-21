@@ -28,6 +28,7 @@ class RequestSequence extends StatefulWidget {
   final ProxyServer proxyServer;
   final bool displayDomain;
   final bool? sortDesc;
+  final bool followLatest;
   final Function(List<HttpRequest>)? onRemove;
   final MultiSelectController selectionController;
 
@@ -38,6 +39,7 @@ class RequestSequence extends StatefulWidget {
       this.displayDomain = true,
       this.onRemove,
       this.sortDesc,
+      this.followLatest = false,
       required this.selectionController});
 
   @override
@@ -48,8 +50,11 @@ class RequestSequence extends StatefulWidget {
 
 class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliveClientMixin {
   late final MultiSelectListener<String> selectionListener;
+  final ScrollController _scrollController = ScrollController();
+  bool _atBottom = true;
+  bool _scrollToBottomAfterBuild = false;
 
-  ///显示的请求列表 最新的在前面
+  ///显示的请求列表
   Queue<HttpRequest> view = Queue();
   bool changing = false;
 
@@ -72,7 +77,12 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   void initState() {
     super.initState();
     sortDesc = widget.sortDesc ?? true;
-    view.addAll(widget.container.source.reversed);
+    view.addAll(sortDesc ? widget.container.source.reversed : widget.container.source);
+    if (widget.followLatest && !sortDesc && view.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_atBottom) _jumpToBottom();
+      });
+    }
     selectionListener = MultiSelectListener((items) {
       if (!mounted) {
         return;
@@ -94,7 +104,31 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   void dispose() {
     widget.selectionController.selectedIds.removeListener(selectionListener);
     KeywordHighlights.removeListener(highlightListener);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _jumpToBottom() {
+    if (mounted && _scrollController.hasClients) {
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    }
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.depth == 0 &&
+        (notification is ScrollUpdateNotification || notification is ScrollEndNotification)) {
+      _atBottom = notification.metrics.extentAfter <= 2;
+      if (!_atBottom) _scrollToBottomAfterBuild = false;
+    }
+    return false;
+  }
+
+  void _trackScrollPositionAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _atBottom = _scrollController.position.extentAfter <= 2;
+      }
+    });
   }
 
   ///添加请求
@@ -108,6 +142,7 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
       view.addFirst(request);
     } else {
       view.addLast(request);
+      if (widget.followLatest && _atBottom) _scrollToBottomAfterBuild = true;
     }
 
     changeState();
@@ -125,7 +160,12 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     //搜索视图
     if (searchModel?.filter(response.request!, response) == true && callback == null) {
       if (!view.contains(response.request)) {
-        view.addFirst(response.request!);
+        final matches = widget.container.where((request) =>
+            searchModel!.filter(request, identical(request, response.request) ? response : request.response));
+        view = Queue.of(sortDesc ? matches.toList().reversed : matches);
+        if (widget.followLatest && !sortDesc && _atBottom && view.isNotEmpty && view.last == response.request) {
+          _scrollToBottomAfterBuild = true;
+        }
         changeState();
       }
     }
@@ -137,8 +177,10 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
       view.clear();
       responseCallbacks.clear();
 
-      view.addAll(widget.container.source.reversed);
+      view.addAll(sortDesc ? widget.container.source.reversed : widget.container.source);
     });
+    _scrollToBottomAfterBuild = false;
+    _trackScrollPositionAfterFrame();
   }
 
   void remove(List<HttpRequest> list) {
@@ -156,12 +198,15 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
   void search(SearchModel searchModel) {
     this.searchModel = searchModel;
     if (searchModel.isEmpty) {
-      view = Queue.of(widget.container.source.reversed);
+      view = Queue.of(sortDesc ? widget.container.source.reversed : widget.container.source);
     } else {
-      view = Queue.of(widget.container.where((it) => searchModel.filter(it, it.response)).toList().reversed);
+      final matches = widget.container.where((it) => searchModel.filter(it, it.response));
+      view = Queue.of(sortDesc ? matches.toList().reversed : matches);
     }
     selectionController.prune(view.map((request) => request.requestId));
-    changeState();
+    _scrollToBottomAfterBuild = false;
+    setState(() {});
+    _trackScrollPositionAfterFrame();
   }
 
   Iterable<HttpRequest> currentView() {
@@ -203,9 +248,16 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     if (!changing) {
       changing = true;
       Future.delayed(const Duration(milliseconds: 350), () {
+        if (!mounted) return;
         setState(() {
           changing = false;
         });
+        if (_scrollToBottomAfterBuild) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollToBottomAfterBuild && _atBottom) _jumpToBottom();
+            _scrollToBottomAfterBuild = false;
+          });
+        }
       });
     }
   }
@@ -228,51 +280,54 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
               onExport: exportSelected,
               onDelete: deleteSelected),
         Expanded(
-            child: Scrollbar(
-                controller: PrimaryScrollController.maybeOf(context),
-                child: ListView.separated(
-                    controller: PrimaryScrollController.maybeOf(context),
-                    scrollCacheExtent: ScrollCacheExtent.viewport(2.0),
-                    separatorBuilder: (context, index) =>
-                        Divider(thickness: 0.2, height: 0, color: Theme.of(context).dividerColor),
-                    itemCount: view.length,
-                    itemBuilder: (context, index) {
-                      // 安全边界检查：防止 view 数据变化时索引越界
-                      if (index >= view.length) {
-                        return const SizedBox.shrink();
-                      }
-                      final request = view.elementAt(index);
-                      final requestId = request.requestId;
+            child: NotificationListener<ScrollNotification>(
+                onNotification: _onScroll,
+                child: Scrollbar(
+                    controller: _scrollController,
+                    child: ListView.separated(
+                        controller: _scrollController,
+                        scrollCacheExtent: ScrollCacheExtent.viewport(2.0),
+                        separatorBuilder: (context, index) =>
+                            Divider(thickness: 0.2, height: 0, color: Theme.of(context).dividerColor),
+                        itemCount: view.length,
+                        itemBuilder: (context, index) {
+                          // 安全边界检查：防止 view 数据变化时索引越界
+                          if (index >= view.length) {
+                            return const SizedBox.shrink();
+                          }
+                          final request = view.elementAt(index);
+                          final requestId = request.requestId;
 
-                      return RequestRow(
-                          key: ValueKey(requestId),
-                          index: sortDesc ? view.length - index : index,
-                          request: request,
-                          proxyServer: widget.proxyServer,
-                          displayDomain: widget.displayDomain,
-                          selectionController: selectionController,
-                          selectionHandlers: RequestSelectionHandlers(
-                              onDeleteSelected: deleteSelected,
-                              onExportSelected: exportSelected,
-                              onRepeatSelected: repeatSelected),
-                          onMount: (callback) => responseCallbacks[requestId] = callback,
-                          onUnmount: () => responseCallbacks.remove(requestId),
-                          onRemove: (item) {
-                            setState(() {
-                              view.remove(item);
-                              responseCallbacks.remove(requestId);
-                            });
-                            selectionController.remove(item.requestId);
-                            widget.onRemove?.call([item]);
-                          });
-                    })))
+                          return RequestRow(
+                              key: ValueKey(requestId),
+                              index: sortDesc ? view.length - index : index + 1,
+                              request: request,
+                              proxyServer: widget.proxyServer,
+                              displayDomain: widget.displayDomain,
+                              selectionController: selectionController,
+                              selectionHandlers: RequestSelectionHandlers(
+                                  onDeleteSelected: deleteSelected,
+                                  onExportSelected: exportSelected,
+                                  onRepeatSelected: repeatSelected),
+                              onMount: (callback) => responseCallbacks[requestId] = callback,
+                              onUnmount: () => responseCallbacks.remove(requestId),
+                              onRemove: (item) {
+                                setState(() {
+                                  view.remove(item);
+                                  responseCallbacks.remove(requestId);
+                                });
+                                selectionController.remove(item.requestId);
+                                widget.onRemove?.call([item]);
+                              });
+                        }))))
       ]);
     });
   }
 
   void scrollToTop() {
-    PrimaryScrollController.maybeOf(context)
-        ?.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.ease);
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.ease);
+    }
   }
 
   ///排序
@@ -285,6 +340,8 @@ class RequestSequenceState extends State<RequestSequence> with AutomaticKeepAliv
     setState(() {
       view = Queue.of(view.toList().reversed);
     });
+    _scrollToBottomAfterBuild = false;
+    _trackScrollPositionAfterFrame();
   }
 
   void exportSelected() {

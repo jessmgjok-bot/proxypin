@@ -35,6 +35,7 @@ class HeadersWidget extends StatefulWidget {
   final HttpMessage? message;
   final TextStyle valueTextStyle;
   final bool initiallyExpanded;
+  final bool embedded;
 
   /// Optional shared controller for raw-text mode, so caller can reuse
   /// controllers between rebuilds (e.g. separate for Request/Response).
@@ -46,6 +47,7 @@ class HeadersWidget extends StatefulWidget {
     required this.message,
     this.valueTextStyle = const TextStyle(fontSize: 14),
     this.initiallyExpanded = true,
+    this.embedded = false,
     this.controller,
   });
 
@@ -113,6 +115,15 @@ class _HeadersWidgetState extends State<HeadersWidget> {
   @override
   Widget build(BuildContext context) {
     final isTextMode = (AppConfiguration.current?.headerViewMode ?? 'table') == 'text';
+    if (widget.embedded) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          _buildCopyButton(context),
+          _buildHeaderModeToggle(context),
+        ]),
+        ...(!isTextMode ? _buildHeaderRows(widget.message) : buildTextMode(widget.message)),
+      ]);
+    }
     return ExpansionTile(
       tilePadding: const EdgeInsets.only(left: 0),
       dense: true,

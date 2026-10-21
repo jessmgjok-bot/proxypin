@@ -20,8 +20,12 @@ import 'package:flutter/services.dart';
 import 'package:proxypin/l10n/app_localizations.dart';
 import 'package:proxypin/network/bin/server.dart';
 import 'package:proxypin/network/http/http.dart';
+import 'package:proxypin/ui/component/search/highlight_text.dart';
+import 'package:proxypin/ui/component/search/search_controller.dart';
+import 'package:proxypin/ui/component/split_view.dart';
 import 'package:proxypin/ui/component/state_component.dart';
 import 'package:proxypin/ui/component/utils.dart';
+import 'package:proxypin/ui/configuration.dart';
 import 'package:proxypin/ui/content/web_socket.dart';
 import 'package:proxypin/ui/content/mqtt.dart';
 import 'package:proxypin/utils/lang.dart';
@@ -97,6 +101,8 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
 
   final GlobalKey<HttpBodyState> requestHttpBodyKey = GlobalKey<HttpBodyState>();
   final GlobalKey<HttpBodyState> responseHttpBodyKey = GlobalKey<HttpBodyState>();
+  bool get _verticalLayout =>
+      Platforms.isDesktop() && !_mqttTabs && AppConfiguration.current?.detailLayoutMode == 'vertical';
 
   void changeState() {
     final mqtt = widget.request.get()?.protocolVersion == 'MQTT';
@@ -175,44 +181,105 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
       tabs: tabs.map((title) => Tab(child: Text(title, style: widget.tabStyle, maxLines: 1))).toList(),
     );
 
-    Widget appBar = widget.title == null
-        ? tabBar
-        : AppBar(
-            title: widget.title,
-            bottom: tabBar,
-            centerTitle: true,
-            actions: [
-              ShareWidget(
-                  proxyServer: widget.proxyServer, request: widget.request.get(), response: widget.response.get()),
-              const SizedBox(width: 3),
-              DetailMenuWidget(request: widget.request.get()),
-              const SizedBox(width: 10),
-            ],
-          );
+    final vertical = _verticalLayout;
+    final layoutMenu = PopupMenuButton<String>(
+      tooltip: 'Detail layout',
+      icon: Icon(vertical ? Icons.view_agenda_outlined : Icons.tab_outlined, size: 20),
+      onSelected: (value) {
+        final config = AppConfiguration.current;
+        if (config == null) return;
+        config.detailLayoutMode = value;
+        config.flushConfig();
+        requestHttpBodyKey.currentState?.hideSearchOverlay();
+        responseHttpBodyKey.currentState?.hideSearchOverlay();
+        setState(() {});
+      },
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(value: 'tabs', checked: !vertical, child: const Text('Tabs')),
+        CheckedPopupMenuItem(value: 'vertical', checked: vertical, child: const Text('Top / Bottom')),
+      ],
+    );
+
+    final PreferredSizeWidget appBar;
+    if (vertical) {
+      appBar = AppBar(
+        automaticallyImplyLeading: false,
+        toolbarHeight: 42,
+        title: widget.title ?? const Text('Request / Response', style: TextStyle(fontSize: 15)),
+        actions: [
+          layoutMenu,
+          if (widget.title != null) ...[
+            ShareWidget(proxyServer: widget.proxyServer, request: widget.request.get(), response: widget.response.get()),
+            DetailMenuWidget(request: widget.request.get()),
+            const SizedBox(width: 10),
+          ],
+        ],
+      );
+    } else if (widget.title == null) {
+      appBar = Platforms.isDesktop() && !isMqtt
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(48),
+              child: Row(children: [Expanded(child: tabBar), layoutMenu]),
+            )
+          : tabBar;
+    } else {
+      appBar = AppBar(
+        title: widget.title,
+        bottom: tabBar,
+        centerTitle: true,
+        actions: [
+          if (Platforms.isDesktop() && !isMqtt) layoutMenu,
+          ShareWidget(proxyServer: widget.proxyServer, request: widget.request.get(), response: widget.response.get()),
+          const SizedBox(width: 3),
+          DetailMenuWidget(request: widget.request.get()),
+          const SizedBox(width: 10),
+        ],
+      );
+    }
 
     return Scaffold(
       endDrawerEnableOpenDragGesture: false,
-      appBar: appBar as PreferredSizeWidget?,
-      body: Padding(
-          padding: const EdgeInsets.only(left: 20, right: 20, top: 10),
-          child: TabBarView(
-            physics: Platforms.isDesktop() ? const NeverScrollableScrollPhysics() : null, //桌面禁止滑动
-            controller: _tabController,
-            children: isMqtt
-                ? [
-                    SelectionArea(child: General(widget.request, widget.response)),
-                    SelectionArea(child: MqttMessages(widget.request)),
-                  ]
-                : [
-                    SelectionArea(child: General(widget.request, widget.response)),
-                    KeepAliveWrapper(child: request()),
-                    KeepAliveWrapper(child: response()),
-                    SelectionArea(
-                        child: isStreamMessages
-                            ? Websocket(widget.request, widget.response)
-                            : Cookies(widget.request, widget.response)),
-                  ],
-          )),
+      appBar: appBar,
+      body: vertical
+          ? HorizontalSplitView(
+              ratio: 0.5,
+              minRatio: 0.2,
+              maxRatio: 0.8,
+              top: _TrafficPane(
+                key: ValueKey('request-${widget.request.get()?.requestId}'),
+                requestPane: true,
+                request: widget.request,
+                response: widget.response,
+                hideRequestRewrite: widget.windowId != null,
+              ),
+              bottom: _TrafficPane(
+                key: ValueKey('response-${widget.request.get()?.requestId}'),
+                requestPane: false,
+                request: widget.request,
+                response: widget.response,
+                hideRequestRewrite: widget.windowId != null,
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.only(left: 20, right: 20, top: 10),
+              child: TabBarView(
+                physics: Platforms.isDesktop() ? const NeverScrollableScrollPhysics() : null, //桌面禁止滑动
+                controller: _tabController,
+                children: isMqtt
+                    ? [
+                        SelectionArea(child: General(widget.request, widget.response)),
+                        SelectionArea(child: MqttMessages(widget.request)),
+                      ]
+                    : [
+                        SelectionArea(child: General(widget.request, widget.response)),
+                        KeepAliveWrapper(child: request()),
+                        KeepAliveWrapper(child: response()),
+                        SelectionArea(
+                            child: isStreamMessages
+                                ? Websocket(widget.request, widget.response)
+                                : Cookies(widget.request, widget.response)),
+                      ],
+              )),
     );
   }
 
@@ -227,13 +294,14 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
       path = Uri.decodeFull(path);
     } catch (_) {}
 
-    return SingleChildScrollView(
+    final details = SingleChildScrollView(
         controller: scrollController,
         child: Column(children: [
           RowWidget("Path", path),
           RequestParams(widget.request),
           ...message(widget.request.get(), "Request", scrollController)
         ]));
+    return _withConsole(details, widget.request.get()!.requestScriptLogs);
   }
 
   Widget response() {
@@ -242,12 +310,29 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
     }
 
     var scrollController = ScrollController();
-    return SingleChildScrollView(
+    final details = SingleChildScrollView(
         controller: scrollController,
         child: Column(children: [
           RowWidget("StatusCode", widget.response.get()?.status.toString()),
           ...message(widget.response.get(), "Response", scrollController)
         ]));
+    return _withConsole(details, widget.request.get()?.responseScriptLogs ?? const []);
+  }
+
+  Widget _withConsole(Widget details, List<ScriptConsoleEntry> logs) {
+    if (logs.isEmpty) return details;
+    return DefaultTabController(
+      length: 2,
+      child: Column(children: [
+        const TabBar(tabs: [Tab(text: 'Details', height: 36), Tab(text: 'Console', height: 36)]),
+        Expanded(
+          child: TabBarView(
+            physics: const NeverScrollableScrollPhysics(),
+            children: [details, _consoleLogView(logs)],
+          ),
+        ),
+      ]),
+    );
   }
 
   List<Widget> message(HttpMessage? message, String type, ScrollController scrollController) {
@@ -259,6 +344,209 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
 
     return [HeadersWidget(title: type, message: message, valueTextStyle: textStyle), bodyWidgets];
   }
+}
+
+class _TrafficPane extends StatelessWidget {
+  final bool requestPane;
+  final ValueWrap<HttpRequest> request;
+  final ValueWrap<HttpResponse> response;
+  final bool hideRequestRewrite;
+
+  const _TrafficPane({
+    super.key,
+    required this.requestPane,
+    required this.request,
+    required this.response,
+    required this.hideRequestRewrite,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final httpRequest = request.get();
+    final httpResponse = response.get();
+    final message = requestPane ? httpRequest : httpResponse;
+    final logs = requestPane ? httpRequest?.requestScriptLogs : httpRequest?.responseScriptLogs;
+    final streamMessages = httpRequest?.isWebSocket == true ||
+        httpResponse?.headers.contentType.toLowerCase().startsWith('text/event-stream') == true;
+    final streamTitle = httpRequest?.isWebSocket == true ? 'WebSocket' : 'SSE';
+    final labels = requestPane
+        ? ['General', 'Raw', 'Headers', 'Body', if (logs?.isNotEmpty == true) 'Console']
+        : [
+            'Raw',
+            'Headers',
+            'Body',
+            streamMessages ? streamTitle : 'Cookies',
+            if (logs?.isNotEmpty == true) 'Console',
+          ];
+    final pages = requestPane
+        ? <Widget>[
+            General(request, response),
+            _raw(message),
+            _headers(message),
+            _body(message),
+            if (logs?.isNotEmpty == true) _consoleLogView(logs!),
+          ]
+        : <Widget>[
+            _raw(message),
+            _headers(message),
+            _body(message),
+            streamMessages ? Websocket(request, response) : Cookies(request, response),
+            if (logs?.isNotEmpty == true) _consoleLogView(logs!),
+          ];
+
+    return DefaultTabController(
+      length: labels.length,
+      child: Column(children: [
+        Row(children: [
+          Expanded(
+            child: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              dividerColor: Theme.of(context).dividerColor.withValues(alpha: 0.25),
+              tabs: labels.map((label) => Tab(text: label, height: 38)).toList(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              requestPane ? (httpRequest?.method.name ?? '') : (httpResponse?.status.code.toString() ?? ''),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary),
+            ),
+          ),
+        ]),
+        Expanded(child: TabBarView(physics: const NeverScrollableScrollPhysics(), children: pages)),
+      ]),
+    );
+  }
+
+  Widget _raw(HttpMessage? message) {
+    if (message == null) return const Center(child: Text('Waiting for response'));
+    final text = StringBuffer();
+    if (message is HttpRequest) {
+      text.writeln('${message.method.name} ${message.pathAndQuery} ${message.protocolVersion}');
+    } else if (message is HttpResponse) {
+      text.writeln('${message.protocolVersion} ${message.status}');
+    }
+    message.headers.forEach((name, values) {
+      for (final value in values) {
+        text.writeln('$name: $value');
+      }
+    });
+    if (message.body?.isNotEmpty == true) {
+      text.writeln();
+      if (message.contentType.isBinary) {
+        text.write('[binary body]');
+      } else if (message.body!.length > 128 * 1024) {
+        text.write('[body exceeds 128 KB; open the Body tab to inspect it]');
+      } else {
+        final body = message.bodyAsString;
+        text.write(body.length > 256 * 1024
+            ? '${body.substring(0, 256 * 1024)}\n[truncated; open the Body tab]'
+            : body);
+      }
+    }
+    return _RawTextPanel(text: text.toString());
+  }
+
+  Widget _headers(HttpMessage? message) {
+    if (message == null) return const Center(child: Text('Waiting for response'));
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: HeadersWidget(
+        title: requestPane ? 'Request' : 'Response',
+        message: message,
+        embedded: true,
+      ),
+    );
+  }
+
+  Widget _body(HttpMessage? message) {
+    if (message == null) return const Center(child: Text('Waiting for response'));
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: HttpBodyWidget(httpMessage: message, hideRequestRewrite: hideRequestRewrite),
+    );
+  }
+
+}
+
+class _RawTextPanel extends StatefulWidget {
+  final String text;
+
+  const _RawTextPanel({required this.text});
+
+  @override
+  State<_RawTextPanel> createState() => _RawTextPanelState();
+}
+
+class _RawTextPanelState extends State<_RawTextPanel> {
+  final SearchTextController _searchController = SearchTextController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lineCount = '\n'.allMatches(widget.text).length + 1;
+    final numbers = List.generate(lineCount, (index) => '${index + 1}').join('\n');
+    final style = const TextStyle(fontSize: 13, fontFamily: 'monospace', height: 1.45);
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: constraints.maxWidth > 1100 ? constraints.maxWidth - 32 : 1100,
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                numbers,
+                textAlign: TextAlign.right,
+                style: style.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: HighlightTextWidget(
+                  text: widget.text,
+                  language: 'http',
+                  style: style,
+                  searchController: _searchController,
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Widget _consoleLogView(List<ScriptConsoleEntry> logs) {
+  return ListView.separated(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    itemCount: logs.length,
+    separatorBuilder: (_, __) => const Divider(height: 14),
+    itemBuilder: (context, index) {
+      final entry = logs[index];
+      final color = entry.level == 'error'
+          ? Theme.of(context).colorScheme.error
+          : entry.level == 'warn'
+              ? Colors.orange
+              : Theme.of(context).colorScheme.onSurfaceVariant;
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 12, runSpacing: 4, children: [
+          Text(entry.time.formatMillisecond(), style: TextStyle(fontSize: 11, color: color)),
+          Text(entry.level.toUpperCase(), style: TextStyle(fontSize: 11, color: color)),
+          if (entry.scriptName != null) Text(entry.scriptName!, style: TextStyle(fontSize: 11, color: color)),
+        ]),
+        const SizedBox(height: 4),
+        SelectableText(entry.output, style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+      ]);
+    },
+  );
 }
 
 Widget expansionTile(String title, List<Widget> content,

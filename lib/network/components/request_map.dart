@@ -110,11 +110,17 @@ class RequestMapInterceptor extends Interceptor {
     var context = jsonEncode(ctxMap);
     var jsRequest = jsonEncode(await JavaScriptEngine.convertJsRequest(request));
 
-    var result = await flutterJsPool!.run((flutterJs) async {
-      var jsResult = await flutterJs.evaluateAsync(
-          """var request = $jsRequest, context = $context;  request['scriptContext'] = context; $script\n  onRequest(context, request)""");
-      return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
-    });
+    dynamic result;
+    try {
+      result = await flutterJsPool!.run((flutterJs) async {
+        var jsResult = await flutterJs.evaluateAsync(
+            """var request = $jsRequest, context = $context;  request['scriptContext'] = context; $script\n  onRequest(context, request)""");
+        return await JavaScriptEngine.jsResultResolve(flutterJs, jsResult);
+      }, onConsoleLog: (args) => ScriptManager.captureConsoleLog(request, rule.name, args));
+    } catch (error) {
+      request.requestScriptLogs.add(ScriptConsoleEntry('error', error.toString(), scriptName: rule.name));
+      rethrow;
+    }
     if (result == null) {
       return null;
     }

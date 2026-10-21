@@ -45,8 +45,15 @@ class DesktopRequestListWidget extends StatefulWidget {
   final ProxyServer proxyServer;
   final ListenableList<HttpRequest>? list;
   final NetworkTabController panel;
+  final bool followLatest;
 
-  const DesktopRequestListWidget({super.key, required this.proxyServer, this.list, required this.panel});
+  const DesktopRequestListWidget({
+    super.key,
+    required this.proxyServer,
+    this.list,
+    required this.panel,
+    this.followLatest = false,
+  });
 
   @override
   State<StatefulWidget> createState() {
@@ -63,7 +70,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   //请求列表容器
   ListenableList<HttpRequest> container = ListenableList();
 
-  bool sortDesc = true;
+  bool sortDesc = false;
 
   // 选择控制器
   final MultiSelectController selectionController = MultiSelectController();
@@ -73,6 +80,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   @override
   void initState() {
     super.initState();
+    sortDesc = !widget.followLatest;
     if (widget.list != null) {
       container = widget.list!;
     }
@@ -142,6 +150,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
                           DomainList(
                             key: domainListKey,
                             list: container,
+                            initialSortDesc: sortDesc,
                             panel: widget.panel,
                             proxyServer: widget.proxyServer,
                             selectionController: selectionController,
@@ -156,7 +165,9 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
                           RequestSequence(
                             key: requestSequenceKey,
                             container: container,
+                            initialSortDesc: sortDesc,
                             proxyServer: widget.proxyServer,
+                            followLatest: widget.followLatest,
                             selectionController: selectionController,
                             selectionHandlers: RequestSelectionHandlers(
                               onRangeSelection: rangeSelectRequest,
