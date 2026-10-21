@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import 'package:proxypin/ui/component/multi_window_compat.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:proxypin/ui/component/multi_window_compat.dart';
 import 'package:proxypin/l10n/app_localizations.dart';
 import 'package:proxypin/network/bin/server.dart';
 import 'package:proxypin/network/http/http.dart';
@@ -32,6 +33,7 @@ import 'package:proxypin/utils/lang.dart';
 import 'package:proxypin/utils/platform.dart';
 
 import 'body.dart';
+import 'console.dart';
 import 'headers.dart';
 import 'menu.dart';
 
@@ -101,6 +103,8 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
 
   final GlobalKey<HttpBodyState> requestHttpBodyKey = GlobalKey<HttpBodyState>();
   final GlobalKey<HttpBodyState> responseHttpBodyKey = GlobalKey<HttpBodyState>();
+  String _requestPaneTab = 'General';
+  String _responsePaneTab = 'Raw';
   bool get _verticalLayout =>
       Platforms.isDesktop() && !_mqttTabs && AppConfiguration.current?.detailLayoutMode == 'vertical';
 
@@ -246,15 +250,19 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
               minRatio: 0.2,
               maxRatio: 0.8,
               top: _TrafficPane(
-                key: ValueKey('request-${widget.request.get()?.requestId}'),
+                key: const ValueKey('request-pane'),
                 requestPane: true,
+                preferredTab: _requestPaneTab,
+                onTabSelected: (label) => _requestPaneTab = label,
                 request: widget.request,
                 response: widget.response,
                 hideRequestRewrite: widget.windowId != null,
               ),
               bottom: _TrafficPane(
-                key: ValueKey('response-${widget.request.get()?.requestId}'),
+                key: const ValueKey('response-pane'),
                 requestPane: false,
+                preferredTab: _responsePaneTab,
+                onTabSelected: (label) => _responsePaneTab = label,
                 request: widget.request,
                 response: widget.response,
                 hideRequestRewrite: widget.windowId != null,
@@ -328,7 +336,7 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
         Expanded(
           child: TabBarView(
             physics: const NeverScrollableScrollPhysics(),
-            children: [details, _consoleLogView(logs)],
+            children: [details, ConsoleLogView(logs, key: ValueKey(widget.request.get()?.requestId))],
           ),
         ),
       ]),
@@ -346,8 +354,10 @@ class NetworkTabState extends State<NetworkTabController> with TickerProviderSta
   }
 }
 
-class _TrafficPane extends StatelessWidget {
+class _TrafficPane extends StatefulWidget {
   final bool requestPane;
+  final String preferredTab;
+  final ValueChanged<String> onTabSelected;
   final ValueWrap<HttpRequest> request;
   final ValueWrap<HttpResponse> response;
   final bool hideRequestRewrite;
@@ -355,21 +365,30 @@ class _TrafficPane extends StatelessWidget {
   const _TrafficPane({
     super.key,
     required this.requestPane,
+    required this.preferredTab,
+    required this.onTabSelected,
     required this.request,
     required this.response,
     required this.hideRequestRewrite,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final httpRequest = request.get();
-    final httpResponse = response.get();
-    final message = requestPane ? httpRequest : httpResponse;
-    final logs = requestPane ? httpRequest?.requestScriptLogs : httpRequest?.responseScriptLogs;
+  State<_TrafficPane> createState() => _TrafficPaneState();
+}
+
+class _TrafficPaneState extends State<_TrafficPane> with TickerProviderStateMixin {
+  late TabController _tabController;
+  late List<String> _labels;
+  late String _preferredLabel;
+
+  List<String> _availableLabels() {
+    final httpRequest = widget.request.get();
+    final httpResponse = widget.response.get();
+    final logs = widget.requestPane ? httpRequest?.requestScriptLogs : httpRequest?.responseScriptLogs;
     final streamMessages = httpRequest?.isWebSocket == true ||
         httpResponse?.headers.contentType.toLowerCase().startsWith('text/event-stream') == true;
     final streamTitle = httpRequest?.isWebSocket == true ? 'WebSocket' : 'SSE';
-    final labels = requestPane
+    return widget.requestPane
         ? ['General', 'Raw', 'Headers', 'Body', if (logs?.isNotEmpty == true) 'Console']
         : [
             'Raw',
@@ -378,28 +397,87 @@ class _TrafficPane extends StatelessWidget {
             streamMessages ? streamTitle : 'Cookies',
             if (logs?.isNotEmpty == true) 'Console',
           ];
-    final pages = requestPane
+  }
+
+  void _createTabController(List<String> labels) {
+    _labels = labels;
+    final preferredIndex = labels.indexOf(_preferredLabel);
+    _tabController = TabController(
+      length: labels.length,
+      initialIndex: preferredIndex < 0 ? 0 : preferredIndex,
+      vsync: this,
+    )..addListener(_rememberSelectedTab);
+  }
+
+  void _selectTab(int index) {
+    if (index >= 0 && index < _labels.length) {
+      final label = _labels[index];
+      if (label == _preferredLabel) return;
+      _preferredLabel = label;
+      widget.onTabSelected(label);
+    }
+  }
+
+  void _rememberSelectedTab() => _selectTab(_tabController.index);
+
+  @override
+  void initState() {
+    super.initState();
+    _preferredLabel = widget.preferredTab;
+    _createTabController(_availableLabels());
+  }
+
+  @override
+  void didUpdateWidget(covariant _TrafficPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final labels = _availableLabels();
+    if (!listEquals(labels, _labels)) {
+      final oldController = _tabController;
+      oldController.removeListener(_rememberSelectedTab);
+      _createTabController(labels);
+      oldController.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final httpRequest = widget.request.get();
+    final httpResponse = widget.response.get();
+    final message = widget.requestPane ? httpRequest : httpResponse;
+    final logs = widget.requestPane ? httpRequest?.requestScriptLogs : httpRequest?.responseScriptLogs;
+    final streamMessages = httpRequest?.isWebSocket == true ||
+        httpResponse?.headers.contentType.toLowerCase().startsWith('text/event-stream') == true;
+    final labels = _labels;
+    final pages = widget.requestPane
         ? <Widget>[
-            General(request, response),
+            General(widget.request, widget.response),
             _raw(message),
             _headers(message),
             _body(message),
-            if (logs?.isNotEmpty == true) _consoleLogView(logs!),
+            if (logs?.isNotEmpty == true)
+              ConsoleLogView(logs!, key: ValueKey(httpRequest?.requestId)),
           ]
         : <Widget>[
             _raw(message),
             _headers(message),
             _body(message),
-            streamMessages ? Websocket(request, response) : Cookies(request, response),
-            if (logs?.isNotEmpty == true) _consoleLogView(logs!),
+            streamMessages ? Websocket(widget.request, widget.response) : Cookies(widget.request, widget.response),
+            if (logs?.isNotEmpty == true)
+              ConsoleLogView(logs!, key: ValueKey(httpRequest?.requestId)),
           ];
 
-    return DefaultTabController(
-      length: labels.length,
-      child: Column(children: [
+    return Column(children: [
         Row(children: [
           Expanded(
             child: TabBar(
+              controller: _tabController,
+              onTap: _selectTab,
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
@@ -410,14 +488,19 @@ class _TrafficPane extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
-              requestPane ? (httpRequest?.method.name ?? '') : (httpResponse?.status.code.toString() ?? ''),
+              widget.requestPane ? (httpRequest?.method.name ?? '') : (httpResponse?.status.code.toString() ?? ''),
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary),
             ),
           ),
         ]),
-        Expanded(child: TabBarView(physics: const NeverScrollableScrollPhysics(), children: pages)),
-      ]),
-    );
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            physics: const NeverScrollableScrollPhysics(),
+            children: pages,
+          ),
+        ),
+      ]);
   }
 
   Widget _raw(HttpMessage? message) {
@@ -454,7 +537,7 @@ class _TrafficPane extends StatelessWidget {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: HeadersWidget(
-        title: requestPane ? 'Request' : 'Response',
+        title: widget.requestPane ? 'Request' : 'Response',
         message: message,
         embedded: true,
       ),
@@ -464,8 +547,9 @@ class _TrafficPane extends StatelessWidget {
   Widget _body(HttpMessage? message) {
     if (message == null) return const Center(child: Text('Waiting for response'));
     return SingleChildScrollView(
+      key: ValueKey(message.requestId),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: HttpBodyWidget(httpMessage: message, hideRequestRewrite: hideRequestRewrite),
+      child: HttpBodyWidget(httpMessage: message, hideRequestRewrite: widget.hideRequestRewrite),
     );
   }
 
@@ -522,31 +606,6 @@ class _RawTextPanelState extends State<_RawTextPanel> {
       ),
     );
   }
-}
-
-Widget _consoleLogView(List<ScriptConsoleEntry> logs) {
-  return ListView.separated(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-    itemCount: logs.length,
-    separatorBuilder: (_, __) => const Divider(height: 14),
-    itemBuilder: (context, index) {
-      final entry = logs[index];
-      final color = entry.level == 'error'
-          ? Theme.of(context).colorScheme.error
-          : entry.level == 'warn'
-              ? Colors.orange
-              : Theme.of(context).colorScheme.onSurfaceVariant;
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(spacing: 12, runSpacing: 4, children: [
-          Text(entry.time.formatMillisecond(), style: TextStyle(fontSize: 11, color: color)),
-          Text(entry.level.toUpperCase(), style: TextStyle(fontSize: 11, color: color)),
-          if (entry.scriptName != null) Text(entry.scriptName!, style: TextStyle(fontSize: 11, color: color)),
-        ]),
-        const SizedBox(height: 4),
-        SelectableText(entry.output, style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
-      ]);
-    },
-  );
 }
 
 Widget expansionTile(String title, List<Widget> content,
