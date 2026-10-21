@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_toastr/flutter_toastr.dart';
@@ -65,6 +67,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   final GlobalKey<RequestSequenceState> requestSequenceKey = GlobalKey<RequestSequenceState>();
   final GlobalKey<DomainWidgetState> domainListKey = GlobalKey<DomainWidgetState>();
   final GlobalKey<SearchState> searchKey = GlobalKey<SearchState>();
+  final FocusNode _listFocusNode = FocusNode();
   TabController? _tabController;
 
   //请求列表容器
@@ -80,6 +83,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
     sortDesc = !widget.followLatest;
     if (widget.list != null) {
       container = widget.list!;
@@ -93,6 +97,8 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    _listFocusNode.dispose();
     RequestWidget.removeAutoReadByIds(container.map((request) => request.requestId));
     selectionController.clear();
     super.dispose();
@@ -109,6 +115,7 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
 
     return FocusableActionDetector(
         autofocus: true,
+        focusNode: _listFocusNode,
         shortcuts: {
           SingleActivator(LogicalKeyboardKey.escape): const _ClearSelectionIntent(),
         },
@@ -188,7 +195,39 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   }
 
   bool _isTextInputFocused() {
-    return FocusManager.instance.primaryFocus?.context?.widget is EditableText;
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    return focusContext?.widget is EditableText ||
+        focusContext?.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  bool _onKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyA) return false;
+    final keyboard = HardwareKeyboard.instance;
+    final primaryModifier = Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed;
+    if (!primaryModifier || keyboard.isAltPressed || keyboard.isShiftPressed ||
+        !_listFocusNode.hasFocus || _isTextInputFocused() || ModalRoute.of(context)?.isCurrent == false) {
+      return false;
+    }
+    selectAllRequests();
+    return true;
+  }
+
+  Iterable<HttpRequest>? _activeRequests() {
+    return _tabController?.index == 1
+        ? requestSequenceKey.currentState?.view
+        : domainListKey.currentState?.currentView();
+  }
+
+  void selectAllRequests() {
+    final requests = _activeRequests();
+    if (requests == null) return;
+    selectionController.selectAll(requests.map((request) => request.requestId));
+  }
+
+  List<HttpRequest> _selectedRequests() {
+    final selectedIds = selectionController.selectedIds.toSet();
+    if (selectedIds.isEmpty) return [];
+    return _activeRequests()?.where((request) => selectedIds.contains(request.requestId)).toList() ?? [];
   }
 
   Widget popupMenus() {
@@ -321,8 +360,8 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   }
 
   void deleteSelected() {
-    final selectedRequests = domainListKey.currentState?.selectedRequests();
-    if (selectedRequests == null || selectedRequests.isEmpty) {
+    final selectedRequests = _selectedRequests();
+    if (selectedRequests.isEmpty) {
       return;
     }
 
@@ -351,14 +390,14 @@ class DesktopRequestListState extends State<DesktopRequestListWidget> with Autom
   }
 
   void repeatSelected() {
-    final selectedRequests = domainListKey.currentState?.selectedRequests();
+    final selectedRequests = _selectedRequests();
     _repeatRequests(selectedRequests);
     selectionController.clear();
   }
 
   Future<void> exportSelected() async {
-    final selectedRequests = domainListKey.currentState?.selectedRequests();
-    if (selectedRequests == null || selectedRequests.isEmpty) {
+    final selectedRequests = _selectedRequests();
+    if (selectedRequests.isEmpty) {
       return;
     }
 

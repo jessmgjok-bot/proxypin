@@ -119,8 +119,8 @@ class FluentApp extends StatelessWidget {
     bool isDark = brightness == Brightness.dark;
 
     Color? themeColor = isDark ? appConfiguration.themeColor : appConfiguration.themeColor;
-    Color? cardColor = isDark ? Color(0XFF3C3C3C) : Colors.white;
-    Color? surfaceContainer = isDark ? Colors.grey[800] : Colors.white;
+    Color? cardColor = isDark ? const Color(0xFF292929) : Colors.white;
+    Color? surfaceContainer = isDark ? const Color(0xFF303030) : Colors.white;
 
     Color? secondary = useMaterial3 ? null : themeColor;
     if (themeColor is MaterialColor) {
@@ -135,7 +135,7 @@ class FluentApp extends StatelessWidget {
       secondary: secondary,
       onPrimary: isDark ? Colors.white : null,
       surfaceContainer: surfaceContainer,
-      surfaceContainerHigh: surfaceContainer,
+      surfaceContainerHigh: isDark ? const Color(0xFF343434) : surfaceContainer,
     );
 
     var themeData =

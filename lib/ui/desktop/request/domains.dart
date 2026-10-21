@@ -370,13 +370,14 @@ class DomainWidgetState extends State<DomainList> with AutomaticKeepAliveClientM
   }
 
   void _refreshRequestSelection(List<String> selectedIds) {
+    final changedIds = selectedIds.toSet();
     var container = containerMap.values;
     if (searchModel?.isNotEmpty == true) {
       container = searchView.values;
     }
     for (var domain in container) {
       for (var requestWidget in domain.body) {
-        if (selectedIds.contains(requestWidget.request.requestId)) {
+        if (changedIds.contains(requestWidget.request.requestId)) {
           requestWidget.changeState();
         }
       }

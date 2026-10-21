@@ -44,6 +44,57 @@ void main() {
     ]);
   });
 
+  test('convertHttpResponse serializes object header values as JSON', () {
+    final response = HttpResponse(HttpStatus.ok)
+      ..headers.set('X-Original', 'kept')
+      ..body = utf8.encode('original');
+
+    final rebuilt = JavaScriptEngine.convertHttpResponse(response, {
+      'statusCode': 200,
+      'headers': {
+        'X-Debug-Info': {'code': 0, 'data': [1, 2]},
+        'Set-Cookie': ['one=1', 'two=2'],
+      },
+      'body': 'original',
+    });
+
+    expect(rebuilt.headers.get('X-Debug-Info'), '{"code":0,"data":[1,2]}');
+    expect(rebuilt.headers.getList('Set-Cookie'), ['one=1', 'two=2']);
+  });
+
+  test('convertHttpRequest serializes object header values as JSON', () {
+    final request = HttpRequest(HttpMethod.get, 'http://example.com/path');
+
+    final rebuilt = JavaScriptEngine.convertHttpRequest(request, {
+      'method': 'GET',
+      'path': '/path',
+      'queries': <String, String>{},
+      'headers': {
+        'X-Debug-Info': {'code': 0},
+      },
+      'body': null,
+    });
+
+    expect(rebuilt.headers.get('X-Debug-Info'), '{"code":0}');
+  });
+
+  test('invalid script headers leave the original response intact', () {
+    final response = HttpResponse(HttpStatus.ok)
+      ..headers.set('X-Original', 'kept')
+      ..body = utf8.encode('original');
+
+    expect(
+      () => JavaScriptEngine.convertHttpResponse(response, {
+        'statusCode': 200,
+        'headers': 'invalid',
+        'body': 'changed',
+      }),
+      throwsFormatException,
+    );
+    expect(response.headers.get('X-Original'), 'kept');
+    expect(response.bodyAsString, 'original');
+  });
+
   test('codec encode emits each Set-Cookie value as its own header line', () {
     final response = HttpResponse(HttpStatus.ok)
       ..headers.addAll(buildResponseWithSetCookies())

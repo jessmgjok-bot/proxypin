@@ -194,7 +194,10 @@ class _LazyIndexedStackState extends State<LazyIndexedStack> {
       index: widget.index,
       children: List.generate(
         widget.children.length,
-        (i) => _childrenCache[i] ?? Container(),
+        (i) => ExcludeFocus(
+          excluding: i != widget.index,
+          child: _childrenCache[i] ?? Container(),
+        ),
       ),
     );
   }

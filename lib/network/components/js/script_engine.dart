@@ -220,7 +220,7 @@ class JavaScriptEngine {
 
   //http request
   static HttpRequest convertHttpRequest(HttpRequest request, Map<dynamic, dynamic> map) {
-    request.headers.clear();
+    final headers = _convertJsHeaders(map['headers']);
     request.method = http.HttpMethod.values.firstWhere((element) => element.name == map['method']);
     String query = UriUtils.mapToQuery(map['queries']);
 
@@ -232,14 +232,8 @@ class JavaScriptEngine {
       request.uri = requestUri.toString();
     }
 
-    map['headers'].forEach((key, value) {
-      if (value is List) {
-        request.headers.addValues(key, value.map((e) => e.toString()).toList());
-        return;
-      }
-      request.headers.set(key, value);
-    });
-
+    request.headers.clear();
+    request.headers.addAll(headers);
     request.headers.remove(HttpHeaders.CONTENT_ENCODING);
 
     //判断是否是二进制
@@ -258,17 +252,11 @@ class JavaScriptEngine {
 
   //http response
   static HttpResponse convertHttpResponse(HttpResponse response, Map<dynamic, dynamic> map) {
+    final headers = _convertJsHeaders(map['headers']);
+    final status = HttpStatus.valueOf(map['statusCode']);
     response.headers.clear();
-    response.status = HttpStatus.valueOf(map['statusCode']);
-    map['headers'].forEach((key, value) {
-      if (value is List) {
-        response.headers.addValues(key, value.map((e) => e.toString()).toList());
-        return;
-      }
-
-      response.headers.set(key, value);
-    });
-
+    response.status = status;
+    response.headers.addAll(headers);
     response.headers.remove(HttpHeaders.CONTENT_ENCODING);
 
     //判断是否是二进制
@@ -283,5 +271,28 @@ class JavaScriptEngine {
     }
 
     return response;
+  }
+
+  static HttpHeaders _convertJsHeaders(dynamic value) {
+    if (value is! Map) {
+      throw FormatException('Script headers must be an object');
+    }
+    final headers = HttpHeaders();
+    value.forEach((key, headerValue) {
+      if (key is! String) {
+        throw FormatException('Script header names must be strings');
+      }
+      if (headerValue is List) {
+        headers.addValues(key, headerValue.map(_scriptHeaderValue).toList());
+      } else {
+        headers.set(key, _scriptHeaderValue(headerValue));
+      }
+    });
+    return headers;
+  }
+
+  static String _scriptHeaderValue(dynamic value) {
+    if (value is Map || value is List) return jsonEncode(value);
+    return value.toString();
   }
 }

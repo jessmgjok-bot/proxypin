@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -40,22 +41,49 @@ import 'package:proxypin/utils/platform.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 bool _refresh = false;
+Timer? _refreshTimer;
+Future<void>? _refreshInFlight;
+
+Future<void> _flushScript() async {
+  while (_refreshInFlight != null) {
+    try {
+      await _refreshInFlight;
+    } catch (_) {
+      // Retry with the latest editor state after a failed save.
+    }
+  }
+
+  final refresh = () async {
+    await (await ScriptManager.instance).flushConfig();
+    await DesktopMultiWindow.invokeMainWindowMethod("refreshScript");
+  }();
+  _refreshInFlight = refresh;
+  try {
+    await refresh;
+  } finally {
+    _refreshInFlight = null;
+  }
+}
 
 /// 刷新脚本
 Future<void> _refreshScript({bool force = false}) async {
   if (force) {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
     _refresh = false;
-    await ScriptManager.instance.then((manager) => manager.flushConfig());
-    await DesktopMultiWindow.invokeMainWindowMethod("refreshScript");
+    await _flushScript();
+    return;
   }
   if (_refresh) {
     return;
   }
   _refresh = true;
-  Future.delayed(const Duration(milliseconds: 1000), () async {
+  _refreshTimer = Timer(const Duration(milliseconds: 1000), () {
+    _refreshTimer = null;
     _refresh = false;
-    await ScriptManager.instance.then((manager) => manager.flushConfig());
-    await DesktopMultiWindow.invokeMainWindowMethod("refreshScript");
+    unawaited(_flushScript().catchError((Object error, StackTrace stackTrace) {
+      logger.e('Save script configuration failed', error: error, stackTrace: stackTrace);
+    }));
   });
 }
 
@@ -71,7 +99,43 @@ class ScriptWidget extends StatefulWidget {
 }
 
 class _ScriptWidgetState extends State<ScriptWidget> {
+  bool _refreshingRemoteScripts = false;
+
   AppLocalizations get localizations => AppLocalizations.of(context)!;
+
+  bool get _isTextInputFocused {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    return focusContext?.widget is EditableText ||
+        focusContext?.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  Future<void> _refreshRemoteScripts() async {
+    if (_refreshingRemoteScripts) return;
+    setState(() => _refreshingRemoteScripts = true);
+    try {
+      await _refreshScript(force: true);
+      final result = await DesktopMultiWindow.invokeMainWindowMethod('refreshRemoteScripts');
+      if (!mounted) return;
+      final counts = result is Map ? result : const {};
+      final total = (counts['total'] as num?)?.toInt() ?? 0;
+      final updated = (counts['updated'] as num?)?.toInt() ?? 0;
+      final failed = (counts['failed'] as num?)?.toInt() ?? 0;
+      FlutterToastr.show(
+        '${localizations.remoteUrl} ${localizations.script}: $updated/$total ${localizations.success}, '
+        '$failed ${localizations.fail}',
+        context,
+        position: FlutterToastr.top,
+      );
+    } catch (e, stackTrace) {
+      logger.e('Refresh remote scripts failed', error: e, stackTrace: stackTrace);
+      if (mounted) {
+        FlutterToastr.show('${localizations.refresh} ${localizations.fail}: $e', context,
+            position: FlutterToastr.top);
+      }
+    } finally {
+      if (mounted) setState(() => _refreshingRemoteScripts = false);
+    }
+  }
 
   @override
   void initState() {
@@ -86,6 +150,17 @@ class _ScriptWidgetState extends State<ScriptWidget> {
   }
 
   bool onKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyN &&
+        (Platform.isMacOS ? HardwareKeyboard.instance.isMetaPressed : HardwareKeyboard.instance.isControlPressed) &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        !HardwareKeyboard.instance.isShiftPressed &&
+        ModalRoute.of(context)?.isCurrent != false &&
+        !_isTextInputFocused) {
+      unawaited(_refreshRemoteScripts());
+      return true;
+    }
+
     if (HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.escape) && Navigator.canPop(context)) {
       Navigator.maybePop(context);
       return true;
@@ -94,7 +169,7 @@ class _ScriptWidgetState extends State<ScriptWidget> {
     if ((HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed) &&
         event.logicalKey == LogicalKeyboardKey.keyW) {
       HardwareKeyboard.instance.removeHandler(onKeyEvent);
-      if (_refresh) {
+      if (_refresh || _refreshInFlight != null) {
         _refreshScript(force: true).whenComplete(() => WindowController.fromWindowId(widget.windowId).close());
         return true;
       }
@@ -154,6 +229,19 @@ class _ScriptWidgetState extends State<ScriptWidget> {
                                   icon: const Icon(Icons.terminal, size: 18),
                                   onPressed: consoleLog,
                                   label: Text(localizations.logger),
+                                ),
+                                const SizedBox(width: 10),
+                                IconButton(
+                                  tooltip: '${localizations.refresh} ${localizations.remoteUrl} '
+                                      '(${Platform.isMacOS ? 'Cmd+N' : 'Ctrl+N'})',
+                                  onPressed: _refreshingRemoteScripts ? null : _refreshRemoteScripts,
+                                  icon: _refreshingRemoteScripts
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.cloud_download_outlined, size: 20),
                                 ),
                               ],
                             )),

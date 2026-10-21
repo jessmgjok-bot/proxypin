@@ -30,6 +30,27 @@ import 'package:http/http.dart' as http;
 
 import '../js/script_engine.dart';
 
+class RemoteScriptRefreshResult {
+  final int total;
+  final int updated;
+  final List<String> failedScripts;
+
+  const RemoteScriptRefreshResult({
+    required this.total,
+    required this.updated,
+    required this.failedScripts,
+  });
+
+  int get failed => failedScripts.length;
+
+  Map<String, dynamic> toJson() => {
+        'total': total,
+        'updated': updated,
+        'failed': failed,
+        'failedScripts': failedScripts,
+      };
+}
+
 /// @author wanghongen
 /// 2023/10/06
 /// js脚本
@@ -63,6 +84,7 @@ async function onResponse(context, request, response) {
   List<ScriptItem> list = [];
 
   final ExpiringCache<ScriptItem, String> _scriptMap = ExpiringCache<ScriptItem, String>(Duration(minutes: 15));
+  Future<RemoteScriptRefreshResult>? _remoteRefreshFuture;
 
   static late JavaScriptRuntimePool flutterJsPool;
 
@@ -153,8 +175,21 @@ async function onResponse(context, request, response) {
         scripts.add(ScriptItem.fromJson(entry));
       }
     }
+    if (_remoteRefreshFuture != null) await _remoteRefreshFuture;
+    final remoteCache = <String, String>{};
+    for (final item in list) {
+      final url = item.remoteUrl?.trim();
+      final content = _scriptMap[item];
+      if (url != null && url.isNotEmpty && content != null) {
+        remoteCache[url] = content;
+      }
+    }
     list = scripts;
     _scriptMap.clear();
+    for (final item in scripts) {
+      final content = remoteCache[item.remoteUrl?.trim()];
+      if (content != null) _scriptMap[item] = content;
+    }
   }
 
   static Future<File> get _path async {
@@ -167,14 +202,21 @@ async function onResponse(context, request, response) {
   }
 
   Future<String?> getScript(ScriptItem item) async {
-    // Local script (existing behavior)
+    if (item.remoteUrl?.trim().isNotEmpty == true && _remoteRefreshFuture != null) {
+      await _remoteRefreshFuture;
+    }
     if (_scriptMap.containsKey(item)) {
       return _scriptMap[item]!;
     }
 
     // Remote script
     if (item.remoteUrl != null && item.remoteUrl!.trim().isNotEmpty) {
-      var script = await _fetchRemoteScript(item);
+      final url = item.remoteUrl!.trim();
+      final script = await _fetchRemoteScript(item);
+      if (_remoteRefreshFuture != null) await _remoteRefreshFuture;
+      if (!list.contains(item) || item.remoteUrl?.trim() != url) return null;
+      final refreshed = _scriptMap[item];
+      if (refreshed != null) return refreshed;
       if (script != null) {
         _scriptMap[item] = script;
       }
@@ -197,10 +239,55 @@ async function onResponse(context, request, response) {
 
     final bytes = resp.bodyBytes;
 
-    final content = utf8.decode(bytes);
-    _scriptMap[item] = content;
+    return utf8.decode(bytes);
+  }
 
-    return content;
+  /// Fetch every saved remote script now, keeping cached content when a fetch fails.
+  Future<RemoteScriptRefreshResult> refreshRemoteScripts() async {
+    if (_remoteRefreshFuture != null) return _remoteRefreshFuture!;
+    final refresh = _refreshRemoteScripts();
+    _remoteRefreshFuture = refresh;
+    try {
+      return await refresh;
+    } finally {
+      _remoteRefreshFuture = null;
+    }
+  }
+
+  Future<RemoteScriptRefreshResult> _refreshRemoteScripts() async {
+    final remoteScripts = list.where((item) => item.remoteUrl?.trim().isNotEmpty == true).toList();
+    final failedScripts = <String>[];
+    var updated = 0;
+
+    await Future.wait(remoteScripts.map((item) async {
+      final url = item.remoteUrl!.trim();
+      try {
+        final uri = Uri.tryParse(url);
+        if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https') || uri.host.isEmpty) {
+          throw FormatException('Invalid remote script URL: $url');
+        }
+        final response = await http.get(uri).timeout(const Duration(seconds: 15));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw HttpException('HTTP ${response.statusCode}', uri: uri);
+        }
+        final content = utf8.decode(response.bodyBytes);
+        if (!list.contains(item) || item.remoteUrl?.trim() != url) {
+          failedScripts.add(item.name ?? url);
+          return;
+        }
+        _scriptMap[item] = content;
+        updated++;
+      } catch (error, stackTrace) {
+        failedScripts.add(item.name ?? url);
+        logger.e('Remote script refresh failed: ${item.name ?? url}', error: error, stackTrace: stackTrace);
+      }
+    }));
+
+    return RemoteScriptRefreshResult(
+      total: remoteScripts.length,
+      updated: updated,
+      failedScripts: failedScripts,
+    );
   }
 
   bool _isHttpUrl(String url) {

@@ -56,12 +56,13 @@ class SocketLaunch extends StatefulWidget {
       this.serverLaunch = true});
 
   @override
-  State<StatefulWidget> createState() => _SocketLaunchState();
+  State<SocketLaunch> createState() => SocketLaunchState();
 }
 
-class _SocketLaunchState extends State<SocketLaunch> with WindowListener, WidgetsBindingObserver {
+class SocketLaunchState extends State<SocketLaunch> with WindowListener, WidgetsBindingObserver {
   AppLocalizations get localizations => AppLocalizations.of(context)!;
   bool started = false;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -216,65 +217,55 @@ class _SocketLaunchState extends State<SocketLaunch> with WindowListener, Widget
   Widget build(BuildContext context) {
     Color primaryColor = Theme.of(context).colorScheme.primary;
     return IconButton(
-        tooltip: started ? localizations.stop : localizations.start,
+        tooltip: '${started ? localizations.stop : localizations.start}'
+            '${Platforms.isDesktop() ? ' (${Platform.isMacOS ? 'Cmd+D' : 'Ctrl+D'})' : ''}',
         icon: Icon(started ? Icons.stop : Icons.play_arrow_sharp,
             color: started ? Colors.red : primaryColor, size: widget.size.toDouble()),
-        onPressed: () async {
-          if (started) {
-            if (!widget.serverLaunch) {
-              setState(() {
-                widget.onStop?.call();
-                started = !started;
-              });
-              return;
-            }
+        onPressed: toggle);
+  }
 
-            widget.proxyServer.stop().then((value) {
-              widget.onStop?.call();
-              if (mounted) {
-                setState(() {
-                  started = !started;
-                });
-              }
-            }).catchError((e) {
-              logger.e("stop proxy server failed", error: e);
-              if (mounted) {
-                FlutterToastr.show(localizations.fail, context, duration: 3);
-                setState(() {
-                  started = false;
-                });
-              }
-            });
-          } else {
-            start();
-          }
-        });
+  Future<void> toggle() async {
+    if (_busy) return;
+    if (!started) {
+      await start();
+      return;
+    }
+
+    _busy = true;
+    try {
+      if (widget.serverLaunch) await widget.proxyServer.stop();
+      widget.onStop?.call();
+      if (mounted) setState(() => started = false);
+    } catch (error) {
+      logger.e('stop proxy server failed', error: error);
+      if (mounted) FlutterToastr.show(localizations.fail, context, duration: 3);
+    } finally {
+      _busy = false;
+    }
   }
 
   ///启动代理服务器
   Future<void> start() async {
+    if (_busy) return;
+    _busy = true;
     try {
       if (!widget.serverLaunch) {
         await widget.onStart?.call();
-        setState(() {
-          started = true;
-        });
+        if (mounted) setState(() => started = true);
         return;
       }
 
-      widget.proxyServer.start().then((value) {
-        if (mounted) {
-          setState(() {
-            started = true;
-          });
-        }
-        widget.onStart?.call();
-      }).catchError((e) {
-        logger.e("启动代理服务器失败", error: e);
-        String message = localizations.proxyPortRepeat(widget.proxyServer.port);
+      await widget.proxyServer.start();
+      if (mounted) setState(() => started = true);
+      widget.onStart?.call();
+    } catch (error) {
+      logger.e('启动代理服务器失败', error: error);
+      if (mounted) {
+        final message = localizations.proxyPortRepeat(widget.proxyServer.port);
         FlutterToastr.show(message, context, duration: 3);
-      });
+      }
     } finally {
+      _busy = false;
       Future.delayed(const Duration(seconds: 5)).then((value) {
         if (!mounted) {
           return;

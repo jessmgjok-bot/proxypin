@@ -3,12 +3,22 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_toastr/flutter_toastr.dart';
+import 'package:proxypin/l10n/app_localizations.dart';
 import 'package:proxypin/network/http/http.dart';
+import 'package:proxypin/ui/component/json/json_text.dart';
 import 'package:proxypin/ui/component/json/json_viewer.dart';
 import 'package:proxypin/ui/component/json/theme.dart';
 import 'package:proxypin/ui/component/search/highlight_text.dart';
 import 'package:proxypin/ui/component/search/search_controller.dart';
 import 'package:proxypin/utils/lang.dart';
+
+Future<void> _copyConsoleText(BuildContext context, String text) async {
+  await Clipboard.setData(ClipboardData(text: text));
+  if (context.mounted) {
+    FlutterToastr.show(AppLocalizations.of(context)?.copied ?? 'Copied', context);
+  }
+}
 
 class ConsoleLogView extends StatefulWidget {
   final List<ScriptConsoleEntry> logs;
@@ -115,6 +125,13 @@ class _ConsoleLogViewState extends State<ConsoleLogView> {
                   icon: const Icon(Icons.search, size: 20),
                   onPressed: _openSearch,
                 ),
+              IconButton(
+                tooltip: 'Copy console',
+                icon: const Icon(Icons.copy_outlined, size: 20),
+                onPressed: logs.isEmpty
+                    ? null
+                    : () => _copyConsoleText(context, logs.map((entry) => entry.output).join('\n')),
+              ),
             ]),
             Expanded(
               child: logs.isEmpty
@@ -150,12 +167,49 @@ class _ConsoleEntryView extends StatefulWidget {
   State<_ConsoleEntryView> createState() => _ConsoleEntryViewState();
 }
 
-class _ConsoleEntryViewState extends State<_ConsoleEntryView> {
+class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerProviderStateMixin {
   final _searchController = SearchTextController();
   final _searchIconKey = GlobalKey();
+  late final TabController _formatController;
+  dynamic _jsonValue;
+  bool _isJson = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _formatController = TabController(length: 3, vsync: this)..addListener(_onFormatChanged);
+    _parseOutput();
+  }
+
+  void _parseOutput() {
+    try {
+      _jsonValue = jsonDecode(widget.entry.output);
+      _isJson = _jsonValue is Map<String, dynamic> || _jsonValue is List;
+    } on FormatException {
+      _jsonValue = null;
+      _isJson = false;
+    }
+  }
+
+  void _onFormatChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant _ConsoleEntryView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entry != widget.entry) {
+      _parseOutput();
+      _formatController.removeListener(_onFormatChanged);
+      _formatController.index = 0;
+      _formatController.addListener(_onFormatChanged);
+    }
+  }
 
   @override
   void dispose() {
+    _formatController.removeListener(_onFormatChanged);
+    _formatController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -180,12 +234,6 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> {
         : entry.level == 'warn'
             ? Colors.orange
             : Theme.of(context).colorScheme.onSurfaceVariant;
-    dynamic jsonValue;
-    try {
-      jsonValue = jsonDecode(entry.output);
-    } on FormatException {
-      // Console output also contains ordinary text.
-    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Wrap(spacing: 12, runSpacing: 4, children: [
@@ -201,10 +249,38 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> {
           icon: const Icon(Icons.search),
           onPressed: _toggleSearch,
         ),
+        IconButton(
+          tooltip: 'Copy log',
+          visualDensity: VisualDensity.compact,
+          iconSize: 18,
+          icon: const Icon(Icons.copy_outlined),
+          onPressed: () => _copyConsoleText(context, entry.output),
+        ),
       ]),
       const SizedBox(height: 4),
-      if (jsonValue is Map<String, dynamic> || jsonValue is List)
-        JsonViewer(jsonValue, colorTheme: ColorTheme.of(context), searchController: _searchController)
+      if (_isJson) ...[
+        TabBar(
+          controller: _formatController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelStyle: const TextStyle(fontSize: 12),
+          tabs: const [
+            Tab(text: 'JSON Text', height: 32),
+            Tab(text: 'JSON', height: 32),
+            Tab(text: 'Text', height: 32),
+          ],
+        ),
+        const SizedBox(height: 6),
+      ],
+      if (_isJson && _formatController.index == 0)
+        JsonText(
+          json: _jsonValue,
+          indent: '    ',
+          colorTheme: ColorTheme.of(context),
+          searchController: _searchController,
+        )
+      else if (_isJson && _formatController.index == 1)
+        JsonViewer(_jsonValue, colorTheme: ColorTheme.of(context), searchController: _searchController)
       else
         HighlightTextWidget(
           text: entry.output,

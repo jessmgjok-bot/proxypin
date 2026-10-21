@@ -19,6 +19,12 @@ abstract class ListenerListEvent<T> {
 
   void onAdd(T item);
 
+  void onBatchAdd(List<T> items) {
+    for (final item in items) {
+      onAdd(item);
+    }
+  }
+
   void onRemove(T item);
 
   void onUpdate(T item) {}
@@ -35,6 +41,9 @@ class OnchangeListEvent<T> extends ListenerListEvent<T> {
 
   @override
   void onAdd(T item) => onChange.call();
+
+  @override
+  void onBatchAdd(List<T> items) => onChange.call();
 
   @override
   void onRemove(T item) => onChange.call();
@@ -86,11 +95,11 @@ class ListenableList<T> extends Iterable<T> {
   }
 
   void addAll(Iterable<T> items) {
-    source.addAll(items);
+    final added = items.toList();
+    if (added.isEmpty) return;
+    source.addAll(added);
     for (var element in _listeners) {
-      for (var item in items) {
-        element.onAdd(item);
-      }
+      element.onBatchAdd(added);
     }
   }
 

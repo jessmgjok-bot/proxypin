@@ -42,6 +42,18 @@ class MultiSelectController {
     _anchorId = requestId;
   }
 
+  void selectAll(Iterable<String> requestIds) {
+    final ids = requestIds.toList();
+    if (ids.isEmpty) {
+      return;
+    }
+    selectionMode.value = true;
+    selectedIds
+      ..clear()
+      ..addAll(ids);
+    _anchorId = ids.last;
+  }
+
   void toggleSelectionMode([String? requestId]) {
     if (selectionMode.value) {
       clear();
@@ -110,6 +122,9 @@ class MultiSelectListener<T> extends ListenerListEvent<T> {
 
   @override
   void onAdd(T item) => onChange.call([item]);
+
+  @override
+  void onBatchAdd(List<T> items) => onChange.call(items);
 
   @override
   void onRemove(T item) => onChange.call([item]);

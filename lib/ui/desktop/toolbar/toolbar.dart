@@ -17,7 +17,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_toastr/flutter_toastr.dart';
 import 'package:proxypin/network/bin/server.dart';
+import 'package:proxypin/network/components/manager/script_manager.dart';
 import 'package:proxypin/ui/component/utils.dart';
 import 'package:proxypin/ui/desktop/toolbar/phone_connect.dart';
 import 'package:proxypin/ui/desktop/toolbar/environment_switcher.dart';
@@ -48,6 +50,8 @@ class Toolbar extends StatefulWidget {
 
 class _ToolbarState extends State<Toolbar> {
   AppLocalizations get localizations => AppLocalizations.of(context)!;
+  final GlobalKey<SocketLaunchState> _socketLaunchKey = GlobalKey<SocketLaunchState>();
+  bool _refreshingRemoteScripts = false;
 
   Future<void> _onClear() async {
     if (AppConfiguration.current?.clearConfirm != true) {
@@ -58,6 +62,29 @@ class _ToolbarState extends State<Toolbar> {
     showConfirmDialog(context, title: localizations.clearConfirm, onConfirm: () {
       widget.requestListStateKey.currentState?.clean();
     });
+  }
+
+  Future<void> _onRefreshRemoteScripts() async {
+    if (_refreshingRemoteScripts) return;
+    _refreshingRemoteScripts = true;
+    try {
+      final result = await (await ScriptManager.instance).refreshRemoteScripts();
+      if (!mounted) return;
+      FlutterToastr.show(
+        '${localizations.refresh} ${localizations.remoteUrl} ${localizations.script}: '
+        '${result.updated}/${result.total}'
+        '${result.failed == 0 ? '' : ' (${result.failed} ${localizations.fail})'}',
+        context,
+        position: FlutterToastr.top,
+      );
+    } catch (error) {
+      if (mounted) {
+        FlutterToastr.show('${localizations.refresh} ${localizations.fail}: $error', context,
+            position: FlutterToastr.top);
+      }
+    } finally {
+      _refreshingRemoteScripts = false;
+    }
   }
 
   @override
@@ -74,6 +101,29 @@ class _ToolbarState extends State<Toolbar> {
     if (HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.escape)) {
       if (ModalRoute.of(context)?.isCurrent == false) {
         Navigator.maybePop(context);
+        return true;
+      }
+    }
+
+    final keyboard = HardwareKeyboard.instance;
+    final primaryModifier = Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed;
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    final isEditingText = focusContext?.widget is EditableText ||
+        focusContext?.findAncestorWidgetOfExactType<EditableText>() != null;
+    if (primaryModifier && !keyboard.isAltPressed && !keyboard.isShiftPressed &&
+        !isEditingText && ModalRoute.of(context)?.isCurrent != false) {
+      if (event.logicalKey == LogicalKeyboardKey.keyX) {
+        _onClear();
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.keyN) {
+        _onRefreshRemoteScripts();
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.keyD) {
+        final launch = _socketLaunchKey.currentState;
+        if (launch == null) return false;
+        launch.toggle();
         return true;
       }
     }
@@ -102,9 +152,15 @@ class _ToolbarState extends State<Toolbar> {
   Widget build(BuildContext context) {
     return Row(children: [
       Padding(padding: EdgeInsets.only(left: Platform.isMacOS ? 83 : 20)),
-      SocketLaunch(proxyServer: widget.proxyServer, startup: widget.proxyServer.configuration.startup),
+      SocketLaunch(
+          key: _socketLaunchKey,
+          proxyServer: widget.proxyServer,
+          startup: widget.proxyServer.configuration.startup),
       const Padding(padding: EdgeInsets.only(left: 18)),
-      IconButton(tooltip: localizations.clear, icon: const Icon(Icons.delete_outline, size: 21), onPressed: _onClear),
+      IconButton(
+          tooltip: '${localizations.clear} (${Platform.isMacOS ? 'Cmd+X' : 'Ctrl+X'})',
+          icon: const Icon(Icons.delete_outline, size: 21),
+          onPressed: _onClear),
       const Padding(padding: EdgeInsets.only(left: 18)),
       SslWidget(proxyServer: widget.proxyServer), // SSL配置
       const Padding(padding: EdgeInsets.only(left: 18)),

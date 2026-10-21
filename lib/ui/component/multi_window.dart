@@ -306,6 +306,11 @@ void registerMethodHandler() {
       return 'done';
     }
 
+    if (call.method == 'refreshRemoteScripts') {
+      final result = await (await ScriptManager.instance).refreshRemoteScripts();
+      return result.toJson();
+    }
+
     if (call.method == 'refreshRequestMap') {
       await RequestMapManager.instance.then((value) {
         return value.reloadConfig();
