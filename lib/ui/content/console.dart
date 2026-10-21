@@ -65,13 +65,14 @@ class _ConsoleLogViewState extends State<ConsoleLogView> {
 
   @override
   Widget build(BuildContext context) {
-    final query = _searchController.text.trim().toLowerCase();
+    final query = _searchController.text.trim();
+    final normalizedQuery = query.toLowerCase();
     final logs = query.isEmpty
         ? widget.logs
         : widget.logs.where((entry) {
-            return entry.output.toLowerCase().contains(query) ||
-                entry.level.toLowerCase().contains(query) ||
-                (entry.scriptName?.toLowerCase().contains(query) ?? false);
+            return entry.output.toLowerCase().contains(normalizedQuery) ||
+                entry.level.toLowerCase().contains(normalizedQuery) ||
+                (entry.scriptName?.toLowerCase().contains(normalizedQuery) ?? false);
           }).toList();
 
     return Shortcuts(
@@ -140,7 +141,8 @@ class _ConsoleLogViewState extends State<ConsoleLogView> {
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       itemCount: logs.length,
                       separatorBuilder: (_, __) => const Divider(height: 14),
-                      itemBuilder: (context, index) => _ConsoleEntryView(logs[index], key: ObjectKey(logs[index])),
+                      itemBuilder: (context, index) =>
+                          _ConsoleEntryView(logs[index], searchQuery: query, key: ObjectKey(logs[index])),
                     ),
             ),
           ]),
@@ -160,16 +162,16 @@ class _CloseConsoleSearchIntent extends Intent {
 
 class _ConsoleEntryView extends StatefulWidget {
   final ScriptConsoleEntry entry;
+  final String searchQuery;
 
-  const _ConsoleEntryView(this.entry, {super.key});
+  const _ConsoleEntryView(this.entry, {required this.searchQuery, super.key});
 
   @override
   State<_ConsoleEntryView> createState() => _ConsoleEntryViewState();
 }
 
 class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerProviderStateMixin {
-  final _searchController = SearchTextController();
-  final _searchIconKey = GlobalKey();
+  final _searchController = SearchTextController(inlineSearch: true);
   late final TabController _formatController;
   dynamic _jsonValue;
   bool _isJson = false;
@@ -179,6 +181,7 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerP
     super.initState();
     _formatController = TabController(length: 3, vsync: this)..addListener(_onFormatChanged);
     _parseOutput();
+    _searchController.patternController.text = widget.searchQuery;
   }
 
   void _parseOutput() {
@@ -204,6 +207,9 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerP
       _formatController.index = 0;
       _formatController.addListener(_onFormatChanged);
     }
+    if (oldWidget.searchQuery != widget.searchQuery) {
+      _searchController.patternController.text = widget.searchQuery;
+    }
   }
 
   @override
@@ -212,18 +218,6 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerP
     _formatController.dispose();
     _searchController.dispose();
     super.dispose();
-  }
-
-  void _toggleSearch() {
-    if (_searchController.isSearchOverlayVisible) {
-      _searchController.closeSearch();
-      return;
-    }
-    final renderBox = _searchIconKey.currentContext?.findRenderObject() as RenderBox?;
-    final position = renderBox?.localToGlobal(Offset.zero);
-    _searchController.showSearchOverlay(context,
-        top: position == null ? 100 : (position.dy + (renderBox?.size.height ?? 0) + 8).clamp(100, 240).toDouble(),
-        right: 10);
   }
 
   @override
@@ -241,21 +235,6 @@ class _ConsoleEntryViewState extends State<_ConsoleEntryView> with SingleTickerP
           Text(entry.level.toUpperCase(), style: TextStyle(fontSize: 11, color: color)),
           if (entry.scriptName != null) Text(entry.scriptName!, style: TextStyle(fontSize: 11, color: color)),
         ])),
-        IconButton(
-          key: _searchIconKey,
-          tooltip: 'Search log',
-          visualDensity: VisualDensity.compact,
-          iconSize: 18,
-          icon: const Icon(Icons.search),
-          onPressed: _toggleSearch,
-        ),
-        IconButton(
-          tooltip: 'Copy log',
-          visualDensity: VisualDensity.compact,
-          iconSize: 18,
-          icon: const Icon(Icons.copy_outlined),
-          onPressed: () => _copyConsoleText(context, entry.output),
-        ),
       ]),
       const SizedBox(height: 4),
       if (_isJson) ...[

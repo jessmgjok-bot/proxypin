@@ -6,12 +6,13 @@ import 'package:proxypin/network/util/logger.dart';
 import 'package:proxypin/ui/component/search/search_field.dart';
 
 class SearchTextController extends ValueNotifier<SearchSettings> with WidgetsBindingObserver {
-  SearchTextController() : super(SearchSettings.empty) {
+  SearchTextController({this.inlineSearch = false}) : super(SearchSettings.empty) {
     patternController.addListener(_onPatternControllerChanged);
     WidgetsBinding.instance.addObserver(this); // 添加监听器
   }
 
   final patternController = TextEditingController();
+  final bool inlineSearch;
   RxInt currentMatchIndex = RxInt(0);
   RxInt totalMatchCount = RxInt(0);
 
@@ -22,7 +23,7 @@ class SearchTextController extends ValueNotifier<SearchSettings> with WidgetsBin
   String? _lastPattern;
 
   bool shouldSearch() {
-    return isSearchOverlayVisible && patternController.text.isNotEmpty;
+    return (isSearchOverlayVisible || inlineSearch) && patternController.text.isNotEmpty;
   }
 
   void toggleCaseSensitivity() {

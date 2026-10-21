@@ -26,11 +26,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(JsonViewer), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Search log').first);
+    expect(find.byTooltip('Search console'), findsOneWidget);
+    expect(find.byTooltip('Copy console'), findsOneWidget);
+    expect(find.byTooltip('Search log'), findsNothing);
+    expect(find.byTooltip('Copy log'), findsNothing);
+
+    await tester.tap(find.byTooltip('Search console'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'needle');
     await tester.pumpAndSettle();
     expect(find.text('1 / 1'), findsOneWidget);
+    final jsonViewer = tester.widget<JsonViewer>(find.byType(JsonViewer));
+    expect(jsonViewer.searchController?.shouldSearch(), isTrue);
+    expect(jsonViewer.searchController?.value.pattern, 'needle');
 
     await tester.enterText(find.byType(TextField).last, 'status');
     await tester.pumpAndSettle();
@@ -62,7 +70,7 @@ void main() {
     expect(find.text('1 / 2'), findsOneWidget);
   });
 
-  testWidgets('copy buttons copy the selected log or visible console output', (tester) async {
+  testWidgets('single toolbar copies visible console output', (tester) async {
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') {
@@ -83,15 +91,22 @@ void main() {
       ),
     ));
 
-    final searchButton = find.byTooltip('Search log').first;
-    final copyButton = find.byTooltip('Copy log').first;
+    final searchButton = find.byTooltip('Search console');
+    final copyButton = find.byTooltip('Copy console');
+    expect(searchButton, findsOneWidget);
+    expect(copyButton, findsOneWidget);
+    expect(find.byTooltip('Copy log'), findsNothing);
     expect(tester.getTopLeft(copyButton).dx, greaterThan(tester.getTopLeft(searchButton).dx));
     await tester.tap(copyButton);
     await tester.pump();
-    expect(copied, '{"id":1}');
-
-    await tester.tap(find.byTooltip('Copy console'));
-    await tester.pump();
     expect(copied, '{"id":1}\nsecond output');
+
+    await tester.tap(searchButton);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'second');
+    await tester.pumpAndSettle();
+    await tester.tap(copyButton);
+    await tester.pump();
+    expect(copied, 'second output');
   });
 }
