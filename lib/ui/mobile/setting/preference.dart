@@ -7,6 +7,7 @@ import 'package:proxypin/network/bin/configuration.dart';
 import 'package:proxypin/network/bin/server.dart';
 import 'package:proxypin/network/util/logger.dart';
 import 'package:proxypin/ui/component/widgets.dart';
+import 'package:proxypin/ui/component/settings_backup_actions.dart';
 import 'package:proxypin/ui/configuration.dart';
 import 'package:proxypin/ui/mobile/setting/theme.dart';
 
@@ -147,6 +148,20 @@ class _PreferenceState extends State<Preference> {
                   title: Text(localizations.memoryCleanup),
                   subtitle: Text(localizations.memoryCleanupSubtitle, style: const TextStyle(fontSize: 12)),
                   trailing: memoryCleanup(context, localizations)),
+            ]),
+            const SizedBox(height: 12),
+            section([
+              ListTile(
+                leading: const Icon(Icons.file_download_outlined),
+                title: Text(SettingsBackupActions.importLabel(localizations)),
+                onTap: () => SettingsBackupActions.import(context),
+              ),
+              Divider(height: 0, thickness: 0.3, color: dividerColor),
+              ListTile(
+                leading: const Icon(Icons.file_upload_outlined),
+                title: Text(SettingsBackupActions.exportLabel(localizations)),
+                onTap: () => SettingsBackupActions.export(context),
+              ),
             ]),
             const SizedBox(height: 15),
           ],

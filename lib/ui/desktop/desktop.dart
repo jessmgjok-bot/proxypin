@@ -41,7 +41,6 @@ import 'package:proxypin/ui/desktop/toolbar/toolbar.dart';
 import 'package:proxypin/ui/desktop/widgets/windows_toolbar.dart';
 import 'package:proxypin/utils/listenable_list.dart';
 
-import '../app_update/app_update_repository.dart';
 import '../component/split_view.dart';
 import '../toolbox/toolbox.dart';
 
@@ -127,8 +126,6 @@ class _DesktopHomePagePageState extends State<DesktopHomePage> implements EventL
       WidgetsBinding.instance.addPostFrameCallback((_) {
         showUpgradeNotice();
       });
-    } else {
-      AppUpdateRepository.checkUpdate(context);
     }
   }
 

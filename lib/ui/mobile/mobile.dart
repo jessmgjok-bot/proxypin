@@ -55,7 +55,6 @@ import 'package:proxypin/utils/lang.dart';
 import 'package:proxypin/utils/listenable_list.dart';
 import 'package:proxypin/utils/navigator.dart';
 
-import '../app_update/app_update_repository.dart';
 import 'package:proxypin/ui/component/multi_window.dart';
 import 'package:proxypin/ui/mobile/debug/breakpoint_executor.dart';
 
@@ -149,8 +148,6 @@ class MobileHomeState extends State<MobileHomePage> implements EventListener, Li
       WidgetsBinding.instance.addPostFrameCallback((_) {
         showUpgradeNotice();
       });
-    } else if (Platform.isAndroid) {
-      AppUpdateRepository.checkUpdate(context);
     }
 
     // Handle breakpoint window on mobile

@@ -19,8 +19,6 @@ import 'package:proxypin/ui/configuration.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:proxypin/l10n/app_localizations.dart';
 
-import '../../app_update/app_update_repository.dart';
-
 /// 关于
 class About extends StatefulWidget {
   const About({super.key});
@@ -32,8 +30,6 @@ class About extends StatefulWidget {
 }
 
 class _AboutState extends State<About> {
-  bool checkUpdating = false;
-
   @override
   Widget build(BuildContext context) {
     AppLocalizations localizations = AppLocalizations.of(context)!;
@@ -73,18 +69,6 @@ class _AboutState extends State<About> {
                     trailing: const Icon(Icons.open_in_new, size: 22),
                     onTap: () {
                       _safeLaunch(Uri.parse("$gitHub/issues"));
-                    }),
-                Divider(height: 0, thickness: 0.4, color: Theme.of(context).dividerColor.withValues(alpha: 0.22)),
-                ListTile(
-                    title: Text(localizations.appUpdateCheckVersion),
-                    trailing: checkUpdating
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.sync, size: 22),
-                    onTap: () async {
-                      if (checkUpdating) return;
-                      setState(() => checkUpdating = true);
-                      await AppUpdateRepository.checkUpdate(context, canIgnore: false, showToast: true);
-                      if (mounted) setState(() => checkUpdating = false);
                     }),
                 Divider(height: 0, thickness: 0.4, color: Theme.of(context).dividerColor.withValues(alpha: 0.22)),
                 ListTile(

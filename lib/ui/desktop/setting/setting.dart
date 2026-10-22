@@ -23,6 +23,7 @@ import 'package:proxypin/network/components/manager/request_block_manager.dart';
 import 'package:proxypin/network/util/system_proxy.dart';
 import 'package:proxypin/ui/component/multi_window.dart';
 import 'package:proxypin/ui/component/proxy_port_setting.dart';
+import 'package:proxypin/ui/component/settings_backup_actions.dart';
 import 'package:proxypin/ui/component/widgets.dart';
 import 'package:proxypin/ui/desktop/setting/about.dart';
 import 'package:proxypin/ui/desktop/setting/external_proxy.dart';
@@ -85,6 +86,11 @@ class _SettingState extends State<Setting> {
         item(localizations.weakNetwork, onPressed: showWeakNetwork),
         item(localizations.externalProxy, onPressed: setExternalProxy),
         item(localizations.mcpService, onPressed: () => McpServiceDialog.show(context, widget.proxyServer)),
+        const Divider(thickness: 0.3, height: 8),
+        item(SettingsBackupActions.importLabel(localizations),
+            onPressed: () => SettingsBackupActions.import(context)),
+        item(SettingsBackupActions.exportLabel(localizations),
+            onPressed: () => SettingsBackupActions.export(context)),
         item(localizations.about, onPressed: showAbout),
       ],
     );
